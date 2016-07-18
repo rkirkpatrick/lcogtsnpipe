@@ -1,66 +1,67 @@
 #!/usr/bin/env python
 description = "> Ingest raw data "
-usage = "%prog  instrument -e epoch"
+usage = "%(prog)s  instrument -e epoch"
 
 import re
 import sys
 import string
 import os
-from optparse import OptionParser
+from argparse import ArgumentParser
 import datetime
 import lsc
 from numpy import take, argsort
 
 if __name__ == "__main__":
-    parser = OptionParser(usage=usage, description=description, version="%prog 1.0")
-    parser.add_option("-e", "--epoch", dest="epoch", default='20121212', type="str",
-                      help='epoch to reduce  \t [%default]')
-    parser.add_option("-T", "--telescope", dest="telescope", default='all', type="str",
+    parser = ArgumentParser(usage=usage, description=description, version="%(prog)s 1.0")
+    parser.add_argument("-e", "--epoch", dest="epoch", default='20121212', type=str,
+                      help='epoch to reduce  \t [%(default)s]')
+    parser.add_argument("-T", "--telescope", dest="telescope", default='all', type=str,
                       help='-T telescope ' + ', '.join(lsc.telescope0['all']) + ', '.join(
                           lsc.site0) + ', fts, ftn, 1m0, '
-                                       'kb, fl \t [%default]')
-    parser.add_option("-R", "--RA", dest="ra", default='', type="str",
-                      help='-R  ra    \t [%default]')
-    parser.add_option("-D", "--DEC", dest="dec", default='', type="str",
-                      help='-D dec   \t [%default]')
-    parser.add_option("-n", "--name", dest="name", default='', type="str",
-                      help='-n image name   \t [%default]')
-    parser.add_option("-d", "--id", dest="id", default='', type="str",
-                      help='-d identification id   \t [%default]')
-    parser.add_option("-f", "--filter", dest="filter", default='', type="str",
-                      help='-f filter [sloan,landolt,u,g,r,i,z,U,B,V,R,I] \t [%default]')
-    parser.add_option("-F", "--force", dest="force", action="store_true")
-    parser.add_option("-b", "--bad", dest="bad", default='', type="str",
-                      help='-b bad stage [wcs,psf,psfmag,zcat,abscat,mag,goodcat,getmag,quality,cosmic] \t [%default]')
-    parser.add_option("-s", "--stage", dest="stage", default='', type="str",
+                                       'kb, fl \t [%(default)s]')
+    parser.add_argument("-R", "--RA", dest="ra", default='', type=str,
+                      help='-R  ra    \t [%(default)s]')
+    parser.add_argument("-D", "--DEC", dest="dec", default='', type=str,
+                      help='-D dec   \t [%(default)s]')
+    parser.add_argument("-n", "--name", dest="name", default='', type=str,
+                      help='-n image name   \t [%(default)s]')
+    parser.add_argument("-d", "--id", dest="id", default='', type=str,
+                      help='-d identification id   \t [%(default)s]')
+    parser.add_argument("-f", "--filter", dest="filter", default='', type=str,
+                      help='-f filter [sloan,landolt,u,g,r,i,z,U,B,V,R,I] \t [%(default)s]')
+    parser.add_argument("-F", "--force", dest="force", action="store_true")
+    parser.add_argument("-b", "--bad", dest="bad", default='', type=str,
+                      help='-b bad stage [wcs,psf,psfmag,zcat,abscat,mag,goodcat,getmag,quality,cosmic] \t [%(default)s]')
+    parser.add_argument("-s", "--stage", dest="stage", default='', type=str,
                       help='-s stage [checkwcs,checkpsf,checkmag,checkquality,checkpos,checkcat,'
-                           'checkmissing,checkfvd,checkcosmic] \t [%default]')
-    parser.add_option("--filetype", dest="filetype", default=1, type="int",
-                      help='filetype  1 [single], 2 [merge], 3 differences \t [%default]')
-    parser.add_option("--z1", dest="z1", default=None, type="int",
-                      help='z1 \t [%default]')
-    parser.add_option("--z2", dest="z2", default=None, type="int",
-                      help='z2 \t [%default]')
-    parser.add_option("--temptel", dest="temptel", default='', type="str",
-                      help='--temptel  template instrument \t [%default]')
+                           'checkmissing,checkfvd,checkcosmic] \t [%(default)s]')
+    parser.add_argument("--filetype", dest="filetype", default=1, type=int,
+                      help='filetype  1 [single], 2 [merge], 3 differences \t [%(default)s]')
+    parser.add_argument("--z1", dest="z1", default=None, type=int,
+                      help='z1 \t [%(default)s]')
+    parser.add_argument("--z2", dest="z2", default=None, type=int,
+                      help='z2 \t [%(default)s]')
+    parser.add_argument("--obstype",nargs="+",type=str,dest="obstype", default=[], help = '--obstype\
+                       [e90,e91,e92]\t [%(default)s]\n')
 
-    option, args = parser.parse_args()
-    _telescope = option.telescope
+    args = parser.parse_args()
+    _telescope = args.telescope
     if _telescope not in lsc.telescope0['all'] + lsc.site0 + ['all', 'ftn', 'fts', '1m0', 'kb', 'fl']:
         sys.argv.append('--help')
-    option, args = parser.parse_args()
-    _id = option.id
-    _filter = option.filter
-    _ra = option.ra
-    _dec = option.dec
-    _name = option.name
-    _bad = option.bad
-    _stage = option.stage
-    _z1 = option.z1
-    _z2 = option.z2
-    _filetype = option.filetype
-    _temptel = option.temptel
-    if option.force == None:
+    args = parser.parse_args()
+    _id = args.id
+    _filter = args.filter
+    _ra = args.ra
+    _dec = args.dec
+    _name = args.name
+    _bad = args.bad
+    _stage = args.stage
+    _z1 = args.z1
+    _z2 = args.z2
+    _filetype = args.filetype
+    _obstype = args.obstype
+
+    if args.force == None:
         _redo = False
     else:
         _redo = True
@@ -80,11 +81,11 @@ if __name__ == "__main__":
                 _filter = lsc.sites.filterst(_telescope)[_filter]
             except:
                 pass
-    option, args = parser.parse_args()
-    epoch = option.epoch
+    args = parser.parse_args()
+    epoch = args.epoch
     if '-' not in str(epoch):
         # epoch0 = datetime.date(int(epoch[0:4]), int(epoch[4:6]), int(epoch[6:8]))
-        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', epoch, '', '*', _telescope)
+        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', epoch, '', '*', _telescope,_obstype)
         # lista=getfromdataraw(lsc.src.myloopdef.conn, 'photlco', 'dateobs',str(epoch0), 'all')
     else:
         epoch1, epoch2 = string.split(epoch, '-')
@@ -93,7 +94,7 @@ if __name__ == "__main__":
         listepoch = [re.sub('-', '', str(i)) for i in
                      [start + datetime.timedelta(days=x) for x in range(0, 1 + (stop - start).days)]]
         lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(listepoch[0]),
-                                            str(listepoch[-1]), '*', _telescope)
+                                            str(listepoch[-1]), '*', _telescope,_obstype)
 
     if lista:
         ll0 = {}
