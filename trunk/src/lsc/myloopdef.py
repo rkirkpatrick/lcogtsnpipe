@@ -1836,7 +1836,7 @@ def chosecolor(allfilter, usegood=False, _field=''):
 
 ###########################################################################
 def get_list(epoch, _telescope='all', _filter='', _bad='', _name='', _id='', _ra='', _dec='', database='photlco',
-             filetype=1):
+             filetype=1, _obstype=[]):
     from numpy import argsort, take
     import string, re, sys
     import lsc
@@ -1845,13 +1845,14 @@ def get_list(epoch, _telescope='all', _filter='', _bad='', _name='', _id='', _ra
 
     if '-' not in str(epoch):
         epoch0 = re.sub('-', '', str(datetime.date(int(epoch[0:4]), int(epoch[4:6]), int(epoch[6:8]))))
-        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, database, 'dayobs', str(epoch0), '', '*', _telescope)
+        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, database, 'dayobs', str(epoch0), '', '*',
+                                            _telescope, _obstype)
     else:
         epoch1, epoch2 = string.split(epoch, '-')
         start = re.sub('-', '', str(datetime.date(int(epoch1[0:4]), int(epoch1[4:6]), int(epoch1[6:8]))))
         stop = re.sub('-', '', str(datetime.date(int(epoch2[0:4]), int(epoch2[4:6]), int(epoch2[6:8]))))
         lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, database, 'dayobs', str(start), str(stop), '*',
-                                            _telescope)
+                                            _telescope, _obstype)
     if lista:
         ll0 = {}
         for jj in lista[0].keys(): ll0[jj] = []
