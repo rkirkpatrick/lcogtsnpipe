@@ -29,69 +29,51 @@ def getconnection(site):
    return  connection[site]['hostname'],connection[site]['username'],connection[site]['passwd'],connection[site]['database']
 
 ########################################################################
+def queryfilenamelike(query,likelist=[],datatable=''):
+#Adds onto query a search for entries in the likelist to be within the filename.
+   if datatable:
+      datatable += "."
+   if likelist != []:
+      if len(likelist) == 1:
+         query += ' AND {0}filename like "%{1}%" '.format(datatable,likelist[0])
+      else:
+         for i in range(len(obstype)):
+            if i == 0:
+               query += ' AND ( {0}filename LIKE "%{1}%" '.format(datatable,likelist[i])
+            else:
+               query += ' OR {0}filename LIKE "%{1}%" '.format(datatable,likelist[i])
+         query += ")"
+   return query
 
-def getmissing(conn, epoch0, epoch2,telescope,datatable='photlco'):
+
+def querytelescope(query,telescope='all',datatable=''):
+   import lsc
+   if datatable:
+      datatable += "."
+   if telescope in lsc.util.site0+['1m0','fl','kb','2m0','fs','spectral','sbig','sinistro']:
+      #['elp','lsc','cpt','coj','1m0','kb','fl','ogg']:
+      query += " AND {0}filename LIKE '%{1}%' ".format(datatable,telescope)
+   elif telescope != 'all':
+      query += " AND {0}telescope = {1} ".format(datatable,telescope)
+   return query
+
+
+def getmissing(conn, epoch0, epoch1,telescope='all',datatable='photlco',obstype=[]):
    import sys
    import lsc
    import MySQLdb,os,string
-   print epoch0, epoch2,telescope
+   print epoch0, epoch1, telescope, obstype
    try:
       cursor = conn.cursor (MySQLdb.cursors.DictCursor)
-      if telescope =='all':
-         if epoch2:
-            print "select raw.filename, raw.objname from photlcoraw as raw where "+\
-                " raw.dayobs < "+str(epoch2)+" and raw.dayobs >= "+str(epoch0)+\
-                " and NOT EXISTS(select * from "+str(datatable)+" as redu where raw.filename = redu.filename)"
-            cursor.execute ("select raw.filename, raw.objname from photlcoraw as raw where "+\
-                               " raw.dayobs < "+str(epoch2)+" and raw.dayobs >= "+str(epoch0)+\
-                               " and NOT EXISTS(select * from "+str(datatable)+" as redu where raw.filename = redu.filename)")
-         else:
-            cursor.execute ("select raw.filename, raw.objname from photlcoraw raw where "+\
-                               " raw.dayobs = "+str(epoch0)+\
-                               " and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)")
-      elif telescope in lsc.util.site0+['1m0','fl','kb','2m0','fs']:
-         #['elp','lsc','cpt','coj','1m0','kb','fl','ogg']:
-         if epoch2:  
-            print "select raw.filename, raw.objname from photlcoraw raw where raw.filename like '%"+telescope+"%'"+\
-                               " and raw.dayobs < "+str(epoch2)+" and raw.dayobs >= "+str(epoch0)+\
-                               " and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)"
-            cursor.execute ("select raw.filename, raw.objname from photlcoraw raw where raw.filename like '%"+telescope+"%'"+\
-                               " and raw.dayobs < "+str(epoch2)+" and raw.dayobs >= "+str(epoch0)+\
-                               " and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)")
-         else:
-            print "select raw.filename, raw.objname from photlcoraw raw where raw.filename like '%"+telescope+"%'"+\
-                               " and raw.dayobs = "+str(epoch0)+\
-                               " and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)"
-            cursor.execute ("select raw.filename, raw.objname from photlcoraw raw where raw.filename like '%"+telescope+"%'"+\
-                               " and raw.dayobs = "+str(epoch0)+\
-                               " and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)")
-      else:
-         if epoch2:
-            cursor.execute ("select raw.filename, raw.objname from photlcoraw raw where raw.telescope = '"+str(telescope)+\
-                               "' and raw.dayobs < '"+str(epoch2)+"' and raw.dayobs >= '"+str(epoch0)+\
-                               "' and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)")
-         else:
-            print "select raw.filename, raw.objname from photlcoraw raw where raw.telescope = '"+str(telescope)+\
-                "' and raw.dayobs = "+str(epoch0)+\
-                " and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)"
-            cursor.execute ("select raw.filename, raw.objname from photlcoraw raw where raw.telescope = '"+str(telescope)+\
-                               "' and raw.dayobs = '"+str(epoch0)+\
-                               "' and NOT EXISTS(select * from "+str(datatable)+" redu where raw.filename = redu.filename)")
-      resultSet = cursor.fetchall ()
-      if cursor.rowcount == 0:
-         pass
-      cursor.close ()
-   except MySQLdb.Error, e:
-      print "Error %d: %s" % (e.args[0], e.args[1])
-      sys.exit (1)
-   return resultSet
-
-def getfromdataraw(conn, table, column, value,column2='*'):
-   import sys
-   import MySQLdb,os,string
-   try:
-      cursor = conn.cursor (MySQLdb.cursors.DictCursor)
-      cursor.execute ("select "+column2+" from "+str(table)+" where "+column+"="+"'"+value+"'")
+      query = "SELECT raw.filename,raw.objname FROM photlcoraw AS raw WHERE "
+      if not epoch1:
+         epoch1 = epoch0
+      query += " raw.dayobs <= {0} AND raw.dayobs >= {1} ".format(epoch1,epoch0)
+      query = querytelescope(query,telescope,datatable="raw")
+      query = queryfilenamelike(query,obstype)
+      query += " and NOT EXISTS(select * from "+str(datatable)+" as redu where raw.filename = redu.filename)"
+      print query
+      cursor.execute(query)
       resultSet = cursor.fetchall ()
       if cursor.rowcount == 0:
          pass
@@ -102,27 +84,23 @@ def getfromdataraw(conn, table, column, value,column2='*'):
    return resultSet
 
 
-def getlistfromraw(conn, table, column, value1,value2,column2='*',telescope='all'):
+def getfromdataraw(conn, table, column, value, column2='*'):
+    resultSet = getlistfromraw(conn,table, column, value,value2=None, column2=column2)
+    return resultSet
+
+
+def getlistfromraw(conn, table, column, value1,value2=None,column2='*',telescope='all', obstype=[]):
    import sys
    import lsc
    import MySQLdb,os,string
    try:
       cursor = conn.cursor (MySQLdb.cursors.DictCursor)
-      if telescope=='all':
-         if value2:
-            cursor.execute ("select "+column2+" from "+str(table)+" where "+column+"<="+"'"+value2+"' and "+column+">="+"'"+value1+"'")
-         else:
-            cursor.execute ("select "+column2+" from "+str(table)+" where "+column+"="+"'"+value1+"'")
-      elif telescope in lsc.util.site0+['1m0','fl','kb','2m0','fs','spectral','sbig','sinistro']:
-         if value2:
-            cursor.execute ("select "+column2+" from "+str(table)+" where "+column+"<="+"'"+value2+"' and "+column+">="+"'"+value1+"' and filename like '%"+telescope+"%'")
-         else:
-            cursor.execute ("select "+column2+" from "+str(table)+" where "+column+"="+"'"+value1+"' and filename like '%"+telescope+"%'")
-      else:
-         if value2:
-            cursor.execute ("select "+column2+" from "+str(table)+" where "+column+"<="+"'"+value2+"' and "+column+">="+"'"+value1+"' and telescope='"+telescope+"'")
-         else:
-            cursor.execute ("select "+column2+" from "+str(table)+" where "+column+"="+"'"+value1+"' and  telescope='"+telescope+"'")
+      if not value2:
+         value2 = value1
+      query = "select {0} from {1} where {2} <= '{3}' and {4} >= '{5}'".format(column2,table,column,value2,column,value1)
+      query = querytelescope(query,telescope)
+      query = queryfilenamelike(query,obstype)
+      cursor.execute(query)
       resultSet = cursor.fetchall ()
       if cursor.rowcount == 0:
          pass
@@ -1321,3 +1299,5 @@ def get_snex_uid(interactive=True, return_fullname=False):
 #    vals['idmodified'] = row_id
 #    insert_values(conn, 'useractionlog', vals)
 #    print 'useractionlog updated:', vals
+
+
