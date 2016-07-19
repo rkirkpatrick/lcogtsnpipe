@@ -140,7 +140,8 @@ def source_drop(ifilep, ofilep, ra, dec, fwhm, zeropoint, magnitude=None,residua
     del HDU
 
 ##############################################################################
-description='Copies e91 files from database to e92 and drops fake source into e92'
+description='Creates e92/e93 files with e92 files having a perfect gaussian '\
+            'and e93 files having a psf based of the e91 file.'
 usage='%(prog)s -e epoch [-f filename -m magnitude]'
 version='%(prog)s 0.3'
 
