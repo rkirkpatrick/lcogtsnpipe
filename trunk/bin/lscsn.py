@@ -14,6 +14,7 @@ import re
 from astropy.io.fits import getheader
 from astropy.io import fits
 from optparse import OptionParser
+import time
 
 if __name__ == "__main__":
     parser = OptionParser(usage=usage, description=description)
@@ -626,6 +627,7 @@ if __name__ == "__main__":
                 else:
                     if _numiter >= 1:
                         answ0 = 'y'
+                        time.sleep(1) # need this to prevent occasional error 807
                     else:
                         answ0 = 'n'
                 _count = 0
