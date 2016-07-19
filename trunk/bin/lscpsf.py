@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 description = ">> New automated psf version"
-usage = "%(prog)s image [options] "
+usage = "%prog image [options] "
 
 # ###############################################################
 # EC 2012 Feb 20  
@@ -8,7 +8,7 @@ usage = "%(prog)s image [options] "
 ################################################################
 import os, sys, shutil, subprocess
 import time
-from argparse import ArgumentParser
+from optparse import OptionParser
 from pyraf import iraf
 from astropy.io import fits
 from astropy.io import fits
@@ -510,42 +510,42 @@ def ecpsf(img, ofwhm, threshold, psfstars, distance, interactive, ds9, psffun='g
 ###########################################################################
 if __name__ == "__main__":
     start_time = time.time()
-    parser = ArgumentParser(usage=usage, description=description)
-    parser.add_argument("-f", "--fwhm", dest="fwhm", default='', help='starting FWHM  \t\t\t %(default)s')
-    parser.add_argument("-t", "--threshold", dest="threshold", default=10., type=float,
-                      help='Source detection threshold \t\t\t %(default)s')
-    parser.add_argument("-p", "--psfstars", dest="psfstars", default=6, type=int,
-                      help='Maximum number of psf stars \t\t\t %(default)s')
-    parser.add_argument("-d", "--distance", dest="distance", default=5,
-                      type=int, help='Minimum star separation (in unit of FWHM) \t\t %(default)s')
-    parser.add_argument("--function", dest="psffun", default='gauss', type=str,
-                      help='psf function (gauss,auto,moffat15,moffat25,penny1,penny2,lorentz) \t\t %(default)s')
-    parser.add_argument("-r", "--redo", action="store_true", dest='redo', default=False,
-                      help='Re-do \t\t\t\t [%(default)s]')
-    parser.add_argument("-i", "--interactive", action="store_true", dest='interactive', default=False,
-                      help='Interactive \t\t\t [%(default)s]')
-    parser.add_argument("-s", "--show", dest="show", action='store_true',
-                      default=False, help='Show PSF output \t\t [%(default)s]')
-    parser.add_argument("-X", "--xwindow", action="store_true", dest='xwindow', default=False,
-                      help='xwindow \t\t\t [%(default)s]')
-    parser.add_argument("--use-sextractor", action="store_true", help="use souces from sextractor instead of catalog")
-    parser.add_argument("-c", "--catalog", dest="catalog", default='', type=str,
-                      help='use input catalog  \t\t %(default)s')
-    parser.add_argument("--fix", action="store_true", dest='fixaperture', default=False,
-                      help='fixaperture \t\t\t [%(default)s]')
+    parser = OptionParser(usage=usage, description=description)
+    parser.add_option("-f", "--fwhm", dest="fwhm", default='', help='starting FWHM  \t\t\t %default')
+    parser.add_option("-t", "--threshold", dest="threshold", default=10., type='float',
+                      help='Source detection threshold \t\t\t %default')
+    parser.add_option("-p", "--psfstars", dest="psfstars", default=6, type='int',
+                      help='Maximum number of psf stars \t\t\t %default')
+    parser.add_option("-d", "--distance", dest="distance", default=5,
+                      type='int', help='Minimum star separation (in unit of FWHM) \t\t %default')
+    parser.add_option("--function", dest="psffun", default='gauss', type='str',
+                      help='psf function (gauss,auto,moffat15,moffat25,penny1,penny2,lorentz) \t\t %default')
+    parser.add_option("-r", "--redo", action="store_true", dest='redo', default=False,
+                      help='Re-do \t\t\t\t [%default]')
+    parser.add_option("-i", "--interactive", action="store_true", dest='interactive', default=False,
+                      help='Interactive \t\t\t [%default]')
+    parser.add_option("-s", "--show", dest="show", action='store_true',
+                      default=False, help='Show PSF output \t\t [%default]')
+    parser.add_option("-X", "--xwindow", action="store_true", dest='xwindow', default=False,
+                      help='xwindow \t\t\t [%default]')
+    parser.add_option("--use-sextractor", action="store_true", help="use souces from sextractor instead of catalog")
+    parser.add_option("-c", "--catalog", dest="catalog", default='', type='str',
+                      help='use input catalog  \t\t %default')
+    parser.add_option("--fix", action="store_true", dest='fixaperture', default=False,
+                      help='fixaperture \t\t\t [%default]')
 
-    args = parser.parse_args()
-    if len(sys.argv) < 1:
+    option, args = parser.parse_args()
+    if len(args) < 1: 
         sys.argv.append('--help')
-    args = parser.parse_args()
+    option, args = parser.parse_args()
     imglist = lsc.util.readlist(args[0])
-    _xwindow = args.xwindow
-    _catalog = args.catalog
-    fixaperture = args.fixaperture
-    psffun = args.psffun
+    _xwindow = option.xwindow
+    _catalog = option.catalog
+    fixaperture = option.fixaperture
+    psffun = option.psffun
     if psffun not in ['gauss', 'auto', 'lorentz', 'moffat15', 'moffat25', 'penny1', 'penny2']:
         sys.argv.append('--help')
-    args = parser.parse_args()
+    option, args = parser.parse_args()
 
     if _xwindow:
         from stsci.tools import capable
@@ -553,7 +553,7 @@ if __name__ == "__main__":
         capable.OF_GRAPHICS = False
 
     for img in imglist:
-        if not args.use_sextractor and not _catalog:
+        if not option.use_sextractor and not _catalog:
             targetid = lsc.mysqldef.targimg(img)
             cats = lsc.mysqldef.query(["select sloan_cat, landolt_cat, apass_cat from targets where id="+str(targetid)], lsc.conn)
             if cats:
@@ -562,21 +562,21 @@ if __name__ == "__main__":
                         _catalog = lsc.__path__[0] + '/standard/cat/' + system + '/' + cats[0][system + '_cat']
                         break
         if '.fits' in img: img = img[:-5]
-        if os.path.exists(img + '.sn2.fits') and not args.redo:
+        if os.path.exists(img + '.sn2.fits') and not option.redo:
             print img + ': psf already calculated'
         else:
             ds9 = os.system("ps -U" + str(os.getuid()) + "|grep -v grep | grep ds9")
-            if args.interactive and ds9 != 0:
+            if option.interactive and ds9 != 0:
                 pid = subprocess.Popen(['ds9']).pid
                 time.sleep(2)
                 ds9 = 0
 
-            fwhm0 = args.fwhm
+            fwhm0 = option.fwhm
             while True:
-                result, fwhm = ecpsf(img, fwhm0, args.threshold, args.psfstars,
-                                     args.distance, args.interactive, ds9, psffun, fixaperture, _catalog)
+                result, fwhm = ecpsf(img, fwhm0, option.threshold, option.psfstars,
+                                     option.distance, option.interactive, ds9, psffun, fixaperture, _catalog)
                 print '\n### ' + str(result)
-                if args.show:
+                if option.show:
                     lsc.util.marksn2(img + '.fits', img + '.sn2.fits', 1, '')
                     iraf.delete('tmp.psf.fit?', verify=False)
                     iraf.seepsf(img + '.psf', '_psf.psf')
