@@ -57,8 +57,8 @@ def fitsn(img,imgpsf,coordlist,_recenter,fwhm0,original,sn,residual,_show,_inter
         iraf.noao.digiphot.daophot.phot(original,coordlist,"apori",veri='no')   
         iraf.noao.digiphot.daophot.phot(sn,coordlist,img+".sn.mag",veri='no')   
     else:
-        iraf.noao.digiphot.daophot.phot(original,coordlist,"apori",veri='no',verb='no')   
-        iraf.noao.digiphot.daophot.phot(sn,coordlist,img+".sn.mag",veri='no',verb='no')   
+        iraf.noao.digiphot.daophot.phot(original,coordlist,"apori",veri='no',verb='no')
+        iraf.noao.digiphot.daophot.phot(sn,coordlist,img+".sn.mag",veri='no',verb='no')
 
     lsc.util.delete(img+".sn.als")
     print sn,imgpsf,img
@@ -133,13 +133,13 @@ def fitsn(img,imgpsf,coordlist,_recenter,fwhm0,original,sn,residual,_show,_inter
         print midpt,z11,z22
         _tmp1,_tmp2,goon=lsc.util.display_image(original+'.fits',1, z11, z22, False, _xcen=.25, _ycen=.25, _xsize=.3, _ysize=.3)
         z01 = float(z11)-float(midpt)
-        z02 = float(z22)-float(midpt) 
+        z02 = float(z22)-float(midpt)
         s1 = 1
         s2 = -int(fwhm0)
         lsc.util.delete("tmptbl")
         ff=open('tmptbl','w')
         ff.write(str(s1)+' '+str(s2)+" ORIGINAL")
-        ff.close()    
+        ff.close()
         iraf.tvmark(1,"tmptbl",autol='no',mark="none",inter='no',label='yes',txsize=2)
         _tmp1,_tmp2,goon=lsc.util.display_image('snfit.fits',1, z01, z02, False, _xcen=.25, _ycen=.75, _xsize=.3, _ysize=.3, _erase='no')
         lsc.util.delete("tmptbl")
@@ -147,7 +147,7 @@ def fitsn(img,imgpsf,coordlist,_recenter,fwhm0,original,sn,residual,_show,_inter
         ff=open('tmptbl','w')
         for i in tmptbl0:
             ff.write(i+'\n')
-        ff.close()    
+        ff.close()
         lra = int((2*float(size)*float(fwhm0))*2)
         iraf.tvmark(1,"tmptbl",autol='no',mark="circle", number='yes',nyoffset=lra,radi=a2,txsize=2,inter='no')
         s1 = 1
@@ -155,7 +155,7 @@ def fitsn(img,imgpsf,coordlist,_recenter,fwhm0,original,sn,residual,_show,_inter
         lsc.util.delete("tmptbl")
         ff=open('tmptbl','w')
         ff.write(str(s1)+' '+str(s2)+" FITTED")
-        ff.close()    
+        ff.close()
         iraf.tvmark(1,"tmptbl",autol='no',mark="none",inter='no',label='yes',txsize=2)
         _tmp1,_tmp2,goon=lsc.util.display_image('skyfit.fits',1, z11, z22, False, _xcen=.75, _ycen=.25, _xsize=.3, _ysize=.3, _erase='no')
         s1 = 1
@@ -163,7 +163,7 @@ def fitsn(img,imgpsf,coordlist,_recenter,fwhm0,original,sn,residual,_show,_inter
         lsc.util.delete("tmptbl")
         ff=open('tmptbl','w')
         ff.write(str(s1)+' '+str(s2)+" RESIDUAL")
-        ff.close()    
+        ff.close()
         iraf.tvmark(1,"tmptbl",autol='no',mark="none",inter='no',label='yes',txsize=2)
     return apori1,apori2,apori3,apmag1,apmag2,apmag3,fitmag,truemag,magerr,centx,centy
 
