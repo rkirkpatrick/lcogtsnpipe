@@ -1,5 +1,4 @@
-#!/home/dguevel/conda-envs/david/bin python
-
+#!/usr/bin/env python
 import numpy as np
 from scipy.optimize import minimize
 from astropy.io import fits
