@@ -1364,6 +1364,11 @@ def checkdiff(imglist, database='photlco'):
             photlcodict = lsc.mysqldef.getfromdataraw(conn, database, 'filename', img, '*')
             _dir = photlcodict[0]['filepath']
             diffimg = _dir + img
+            if '.optimal' in diffimg:
+                origimg = diffimg.replace('.optimal.diff','')
+            else:
+                origimg = diffimg.replace('.diff', '')
+            tempimg = origimg.replace('.fits', '.ref.fits')
             origimg = re.sub('\..*diff', '', diffimg)
             tempimg = diffimg.replace('diff', 'ref')
             if os.path.isfile(diffimg) and os.path.isfile(origimg) and os.path.isfile(tempimg):
@@ -2010,7 +2015,7 @@ def run_ingestsloan(imglist,imgtype = 'sloan', ps1frames='', show=False, force=F
     os.system(command)
 
 #####################################################################
-def run_diff(listtar, listtemp, _show=False, _force=False, _normalize='i', _convolve='', _bgo=3, _fixpix=False, suffix='.diff.fits'):
+def run_diff(listtar, listtemp, _show=False, _force=False, _normalize='i', _convolve='', _bgo=3, _fixpix=False, _optimal=False, suffix='.diff.fits'):
     import lsc
 
     direc = lsc.__path__[0]
@@ -2054,7 +2059,11 @@ def run_diff(listtar, listtemp, _show=False, _force=False, _normalize='i', _conv
         fixpix = ' --fixpix '
     else:
         fixpix = ''
-    command = 'lscdiff.py _tar.list _temp.list ' + ii + ff + '--normalize ' + _normalize+_convolve+_bgo + fixpix + ' --suffix ' + suffix
+    if _optimal:
+        optimal = ' --optimal '
+    else:
+        optimal = ''
+    command = 'lscdiff.py _tar.list _temp.list ' + ii + ff + '--normalize ' + _normalize+_convolve+_bgo + fixpix + optimal + ' --suffix ' + suffix
     print command
     os.system(command)
 

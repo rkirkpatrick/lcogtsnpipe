@@ -126,8 +126,13 @@ if __name__ == "__main__":   # main program
     parser.add_argument("--subtract-mag-from-header", action='store_true', help='automatically subtract mag from header of template image \t\t [%(default)s]')
     parser.add_argument("--fixpix", dest="fixpix", action="store_true", default=False,
                       help='Run fixpix on the images before doing image subtraction')
+
     parser.add_argument("--obstype",nargs="+",type=str,dest="obstype", default=[], help = '--obstype\
                        [e90,e91,e92]\t [%(default)s]\n')
+
+    parser.add_argument("--optimal", dest="optimal", action="store_true", default=False, 
+                      help='Use Zackey optimal image subtraction \t [%(default)s]')
+
 
     args = parser.parse_args()
     _instrument=args.instrument
@@ -218,6 +223,7 @@ if __name__ == "__main__":   # main program
     _subtract_mag_from_header = args.subtract_mag_from_header
     _psf = args.psf
     _obstype = args.obstype
+    _optimal = args.optimal
 
     if _xwindow:
         from stsci.tools import capable
@@ -537,7 +543,7 @@ if __name__ == "__main__":   # main program
                         listtar = [k + v for k, v in zip(ll['filepath'], ll['filename'])]
                         listtemp = [k + v for k, v in zip(lltemp['filepath'], lltemp['filename'])]
 
-                        lsc.myloopdef.run_diff(array(listtar), array(listtemp), _show, _redo, _normalize, _convolve, _bgo, _fixpix, suffix)
+			lsc.myloopdef.run_diff(array(listtar), array(listtemp), _show, _redo, _normalize, _convolve, _bgo, _fixpix, suffix)
 
                     elif _stage == 'template':  #    merge images using lacos and swarp
                         listfile = [k + v for k, v in zip(ll['filepath'], ll['filename'])]

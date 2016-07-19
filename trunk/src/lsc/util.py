@@ -17,6 +17,9 @@ elif host in ['supernova.lco.gtn', 'griffin-linux.lco.gtn', 'griffin-Aspire-M5-5
     configfile = 'configure'
 elif host in ['intern1.lco.gtn']:
     workdirectory = '/home/rkirkpatrick/seatide/'
+    configgile = 'configure'
+elif host == 'astrointern.lco.gtn':
+    workdirectory = '/home/dguevel/snwd/'
     configfile = 'configure'
 else:
    sys.exit('ERROR: host machine not recognise, please add your machine in the util file')

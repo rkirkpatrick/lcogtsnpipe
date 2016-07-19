@@ -2,6 +2,7 @@
 description = ">> New automated sn measurement"
 usage = "%prog image [options] "
 
+
 from numpy import array,log10
 import numpy as np
 import lsc
