@@ -37,7 +37,7 @@ def queryfilenamelike(query,likelist=[],datatable=''):
       if len(likelist) == 1:
          query += ' AND {0}filename like "%{1}%" '.format(datatable,likelist[0])
       else:
-         for i in range(len(obstype)):
+         for i in range(len(likelist)):
             if i == 0:
                query += ' AND ( {0}filename LIKE "%{1}%" '.format(datatable,likelist[i])
             else:

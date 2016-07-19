@@ -521,7 +521,7 @@ if __name__ == "__main__":   # main program
                             elif _telescope == 'fs':
                                 fake_temptel = 'spectral'
                             elif _telescope == 'fl':
-				fake _temptel = 'sinistro'
+				fake_temptel = 'sinistro'
                         elif _temptel:
                             fake_temptel = _temptel
                         else:
