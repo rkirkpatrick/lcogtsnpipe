@@ -353,7 +353,7 @@ if __name__ == "__main__":
                             _afssc = ''
 
                         if _optimal:
-                            import OptimalSub
+                            from lsc import OptimalSub
                             psftarg = imgtarg_path.replace('.fits','.psf.fits')
                             psftemp = imgtemp_path.replace('.fits','.psf.fits')
                             OptimalSub.Subtract(imgtarg, imgtemp, psftarg, psftemp, imgout)

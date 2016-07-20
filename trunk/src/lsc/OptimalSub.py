@@ -4,6 +4,7 @@ from scipy.optimize import minimize
 from astropy.io import fits
 from pyraf import iraf
 import time
+from os import system
 
 def Subtract(Nf,Rf,Pnf,Prf,Df):
 
