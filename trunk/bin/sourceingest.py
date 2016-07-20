@@ -182,8 +182,10 @@ if __name__ == "__main__":
 
     if _filename != []:
         query_files = lsc.mysqldef.queryfilenamelike(query_files,_filename)
+
     if _name != '':
         query_files += ' AND objname = "{0}" '.format(_name)
+        name = ' -n ' + _name + ' '
 
     c = conn.cursor()
     c.execute(query_files)
@@ -234,7 +236,7 @@ if __name__ == "__main__":
                 db_ingest(filepath,ofile,force=True)
 
     if _psf:
-        os.system('lscingestredudata.py --obstype e93 -m ' + epoch)
+        os.system('lscingestredudata.py --obstype e93 -m ' + epoch + name)
     else:
-        os.system('lscingestredudata.py --obstype e92 -m ' + epoch)
+        os.system('lscingestredudata.py --obstype e92 -m ' + epoch + name)
 

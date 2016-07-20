@@ -43,6 +43,8 @@ if __name__ == "__main__":
                       help='z2 \t [%(default)s]')
     parser.add_argument("--obstype",nargs="+",type=str,dest="obstype", default=[], help = '--obstype\
                        [e90,e91,e92]\t [%(default)s]\n')
+    parser.add_argument("--temptel", dest="temptel", default='', type=str,
+                        help='--temptel  template instrument \t [%default]')
 
     args = parser.parse_args()
     _telescope = args.telescope
@@ -60,6 +62,7 @@ if __name__ == "__main__":
     _z2 = args.z2
     _filetype = args.filetype
     _obstype = args.obstype
+    _temptel = args.temptel
 
     if args.force == None:
         _redo = False

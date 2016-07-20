@@ -21,7 +21,7 @@ if __name__ == "__main__":
     parser.add_argument("-m", "--missing", dest="missing", action="store_true")
     parser.add_argument("-t", "--type", dest="type", default='raw', type=str,
                       help='type -t type \t [raw/reduced] \n')
-    parser.add_argument("--object", dest="object", default='', type=str,
+    parser.add_argument("-n","--object", dest="object", default='', type=str,
                       help='type --object object \t [name] \n')
     parser.add_argument("--obstype",nargs="+",type=str,dest="obstype", default=[], help = '--obstype\
                          [e90,e91,e92]\t [%(default)s]\n')
