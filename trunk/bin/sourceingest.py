@@ -2,11 +2,9 @@
 """
 How to run it now:
 
-sourceingest.py
-runlsc.py -e YYYYMMDD-YYYYMMDD --obstype e92
+sourceingest.py -e YYYYMMDD-YYYYMMDD -n OBJNAME 
+runlsc.py -e YYYYMMDD-YYYYMMDD --obstype e92 e93
 
-TODO: Consider changing to just copy based off of results of if having
-      source screws up algorithm for runlsc.py.
 """
 import os
 import sys
@@ -36,7 +34,7 @@ def choosemagnitude():
 def comparefakesourcemagnitude(ofilep, magnitude):
     hdulist1 = pyfits.open(ofilep)
     header1 = hdulist1[0].header
-    return(header1['FKSRC'] == magnitude)
+    return(header1['FAKEMAG'] == magnitude)
 
 
 ##############################################################################
@@ -108,12 +106,12 @@ def FWHM2sigma(arcFWHM,header):
     return coordsig
 
 
-def source_drop(ifilep, ofilep, ra, dec, fwhm, zeropoint, magnitude=None,residuals=False):
+def source_drop(ifilep, ofilep, ra, dec, fwhm, zeropoint, magnitude=None,_psf=False):
     """
     Copies ifile into ofile. Drops a gaussian source into ofile, depending
     if magnitude exists. Then to all ofile 'FKSRC' is added to the header
     to describe the magnitude of the dropped source. If there is no
-    magnitude, the 'FKSRC' header will be set as an empty string.
+    magnitude, the 'FAKEMAG' header will be set as an empty string.
     """
     HDU = pyfits.open(ifilep)
     inimage = HDU[0].data
@@ -124,16 +122,15 @@ def source_drop(ifilep, ofilep, ra, dec, fwhm, zeropoint, magnitude=None,residua
         exptime = hdr["exptime"]
         coordsigma  = FWHM2sigma(fwhm,hdr)
 
-        if residuals:
+        if _psf:
             psf = createpsf(shape,xpos,ypos,ifilep)
         else:
             psf = gaussian2d(shape, xpos, ypos, coordsigma)
         psf = psf * magnitude2amplitude(psf,magnitude,zeropoint,exptime)
-        print np.sum(psf,dtype=float)
         outimage = inimage + psf
 
     HDU[0].data = outimage
-    HDU[0].header.set("FKSRC", magnitude,
+    HDU[0].header.set("FAKEMAG", magnitude,
                            "If #s, then magnitude. Else, no fake source")
     HDU.writeto(ofilep, clobber = True)
     HDU.close()
@@ -148,8 +145,10 @@ version='%(prog)s 0.3'
 if __name__ == "__main__":	
     from argparse import ArgumentParser
     parser = ArgumentParser(description=description,usage=usage,version=version)
-    parser.add_argument("-f", "--filename", nargs='+',default=None,help="A "\
+    parser.add_argument("-f", "--filename", nargs='+',default=[],help="A "\
                         "list to search for specific filenames")
+    parser.add_argument("-n", "--name", dest="name", default='', type=str,
+                      help='-n object name   \t [%(default)s]')
     parser.add_argument("-m", "--magnitude",type=float, default=None, help=
                         "Use a specific magnitude when computing PSF")
     parser.add_argument("-e", "--epoch", dest="epoch", default='', type=str,
@@ -160,6 +159,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     _magnitude = args.magnitude
     _filename = args.filename
+    _name = args.name
     _epoch = args.epoch
     _force = args.force
     _psf = args.psf
@@ -171,7 +171,7 @@ if __name__ == "__main__":
     hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
     conn = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
     query_files = 'SELECT filename FROM photlco WHERE filename LIKE "%e91%"\
-                   AND mag != 9999'
+                   AND mag != 9999 AND filetype = 1 '
 
     epoch = "-e " + _epoch
     if '-' not in str(_epoch):
@@ -180,8 +180,10 @@ if __name__ == "__main__":
         epoch1, epoch2 = _epoch.split('-')
         query_files += ' AND dayobs >= {0} AND dayobs <= {1} '.format(epoch1,epoch2)
 
-    if _filename:
+    if _filename != []:
         query_files = lsc.mysqldef.queryfilenamelike(query_files,_filename)
+    if _name != '':
+        query_files += ' AND objname = "{0}" '.format(_name)
 
     c = conn.cursor()
     c.execute(query_files)
@@ -222,13 +224,13 @@ if __name__ == "__main__":
                 print "Deleted old", ofile, "from archive"
                 print "Dropping source into", ofile
                 source_drop(ifilep, ofilep, rcomb["photlcoraw.cat_ra"],
-                   rcomb["photlcoraw.cat_dec"],rcomb["photlco.fwhm"],
-                   rcomb["photlco.z1"],magnitude,_psf)
+                    rcomb["photlcoraw.cat_dec"],rcomb["photlco.fwhm"],
+                    rcomb["photlco.z1"],magnitude,_psf)
                 db_ingest(filepath,ofile,force=True)
         else:
                 source_drop(ifilep, ofilep, rcomb["photlcoraw.cat_ra"],
-                   rcomb["photlcoraw.cat_dec"],rcomb["photlco.fwhm"],
-                   rcomb["photlco.z1"],magnitude,_psf)
+                    rcomb["photlcoraw.cat_dec"],rcomb["photlco.fwhm"],
+                    rcomb["photlco.z1"],magnitude,_psf)
                 db_ingest(filepath,ofile,force=True)
 
     if _psf:
