@@ -43,7 +43,7 @@ def Subtract(Nf,Rf,Pnf,Prf,Df):
     #N=np.subtract(N,Background(N))
     #R=np.subtract(N,Background(R))
 
-    B,gamma=FitB(N_hat,R_hat,Pn_hat,Pr_hat,sn,sr)
+    B,gamma=FitB(N_hat,R_hat,Pn_hat,Pr_hat,sn,sr,N,R)
 
     print 'B = '+str(B)
     print 'Gamma = '+str(gamma)
@@ -87,19 +87,54 @@ def Diff(Bg,N_hat,R_hat,Pn_hat,Pr_hat,sn,sr):
 
     return 0.5*np.sum(eqn**2)
 
-def FitB(N_hat,R_hat,Pn_hat,Pr_hat,sn,sr):
+def FitB(N_hat,R_hat,Pn_hat,Pr_hat,sn,sr,N,R):
     #nonlinear robust least squares
-    bound=[(.1,5.),(-2000.,2000.)]
-    status=False
+    m=np.median(N)-np.median(R)
+    bound=[[0.,10.],[m/4,3*m/4]]
+    #guess=[np.mean(np.divide(np.subtract(N,np.median(N)),np.subtract(R,np.median(R)))),m]
+    guess=[1.,0.]
     mi=1000
     n=N_hat.shape
-    a,b=[n[0]-50,n[1]+50]
+    a,b=[n[0]/2-400,n[0]/2+400]
     N_hat,R_hat,Pn_hat,Pr_hat,sn,sr=N_hat[a:b,a:b],R_hat[a:b,a:b],Pn_hat[a:b,a:b],Pr_hat[a:b,a:b],sn,sr
-    m=minimize(Diff,[1.,0.],args=(N_hat,R_hat,Pn_hat,Pr_hat,sn,sr),bounds=bound,options={'maxiter':mi})
-    status=m.success
+    tol=[0.001,1.]
+    converge=False
+
+    maxiter=5
+    i=0
+    beta_old,gamma_old=guess[0],guess[1]
+    beta,gamma=guess[0],guess[1]
+    while not converge and i<maxiter:
+        print 'Iteration {}'.format(str(i))
+        m=minimize(Diff,[beta_old,gamma_old],args=(N_hat,R_hat,Pn_hat,Pr_hat,sn,sr),bounds=bound,options={'maxiter':mi})
+
+
+        beta_old,gamma_old=beta,gamma
+        beta,gamma=m.x
+
+
+        if beta == bound[0][1]:
+            print 'Upper bound reached on Beta; expanding search space'
+            convergence = False
+            bound[0][1]=bound[0][1]*10
+        elif gamma == bound[1][0]:
+            print 'Upper bound reached on Gamma; expanding search space'
+            convergence = False
+            bound[1][0] += 1000
+        elif gamma == bound[1][1]:
+            print 'Lower bound reached on Gamma; expanding search space'
+            convergence = False
+            bound[1][1] -= 1000
+        else:    
+            converge=m.success
+        i+=1
+
+
+        print beta,gamma
+
     print m
-    B,gamma=m.x
-    return B,gamma
+
+    return beta,gamma
 
 
 def CropImages(N,R,Pn,Pr):
