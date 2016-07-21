@@ -186,6 +186,8 @@ if __name__ == "__main__":
     if _name != '':
         query_files += ' AND objname = "{0}" '.format(_name)
         name = ' -n ' + _name + ' '
+    else:
+        name = ''
 
     c = conn.cursor()
     c.execute(query_files)
