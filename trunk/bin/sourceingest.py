@@ -37,6 +37,31 @@ def comparefakesourcemagnitude(ofilep, magnitude):
     return(header1['FAKEMAG'] == magnitude)
 
 
+def findzeropoint(ifilep):
+    filters1 = {'B': 'B', 'gp': 'g', 'I': 'I', 'ip': 'i', 'R': 'R', 'U': 'U',
+                'landolt': 'landolt', 'V': 'V', 'zs': 'z', 'rp': 'r',
+                'up': 'u', 'sloan': 'sloan'}
+
+    sn2 = ifilep.replace(".fits",".sn2.fits")
+    hdu = pyfits.open(sn2)
+    hdr = hdu[0].header
+    _filter = lsc.util.readkey3(hdr, 'filter')
+    zplist = []
+    for key in hdr:
+        if 'ZP' in key:
+            zplist.append(key)
+    for zp in zplist:
+        if (zp[0:3] == ('ZP' + filters1[_filter].upper())):
+            zeropoint = float(hdr[zp].split()[1])
+            break
+
+    return zeropoint
+
+
+def sexa2deg(ra,dec):
+    ra = Angle(ra,u.hour).degree
+    dec = Angle(dec,u.degree).degree
+    return ra, dec
 ##############################################################################
 ##############################Drop PSF########################################
 ##############################################################################
@@ -106,10 +131,10 @@ def FWHM2sigma(arcFWHM,header):
     return coordsig
 
 
-def source_drop(ifilep, ofilep, ra, dec, fwhm, zeropoint, magnitude=None,_psf=False):
+def source_drop(ifilep, ofilep, ra, dec, fwhm, magnitude=None, _psf=False, _move=False):
     """
     Copies ifile into ofile. Drops a gaussian source into ofile, depending
-    if magnitude exists. Then to all ofile 'FKSRC' is added to the header
+    if magnitude exists. Then to all ofile 'FAKEMAG' is added to the header
     to describe the magnitude of the dropped source. If there is no
     magnitude, the 'FAKEMAG' header will be set as an empty string.
     """
@@ -117,6 +142,16 @@ def source_drop(ifilep, ofilep, ra, dec, fwhm, zeropoint, magnitude=None,_psf=Fa
     inimage = HDU[0].data
     hdr = HDU[0].header
     shape = inimage.shape
+    zeropoint = findzeropoint(ifilep)
+
+    if _move == True:
+        hdr['RA'] = hdr['CAT-RA'] = hdr['OFST-RA'] = ra
+        hdr['DEC'] = hdr['CAT-DEC'] = hdr['OFST-DEC'] = dec
+        HDU[0].header = hdr
+
+        ra, dec = sexa2deg(ra,dec)
+    print "Use this RAS and DECS for lscloop.py -s psfmag:", ra, dec
+
     if magnitude != None:
         xpos, ypos = degs2coords(ra,dec,hdr)	
         exptime = hdr["exptime"]
@@ -156,6 +191,15 @@ if __name__ == "__main__":
     parser.add_argument("-F", "--force", dest="force", action="store_true")
     parser.add_argument("-p","--psf",dest="psf",action="store_true",
                         default=False, help="Use residuals when making PSF")
+    parser.add_argument("--move",dest="move",action="store_true",
+                        default=False, help="Move the placed source")
+    parser.add_argument("--ra", dest="ra", default='', type=str,
+                        help="Manually input RA")
+    parser.add_argument("--dec", dest="dec", default='', type=str,
+                        help="Manually input DEC")
+    parser.add_argument("--negdec", dest="negdec",action="store_true",
+                        default=False, help="Add negative sign to DEC")
+
     args = parser.parse_args()
     _magnitude = args.magnitude
     _filename = args.filename
@@ -163,10 +207,21 @@ if __name__ == "__main__":
     _epoch = args.epoch
     _force = args.force
     _psf = args.psf
+    _move = args.move
+    _ra = args.ra
+    _dec = args.dec
+    _negdec = args.negdec
 
     if (_epoch == ''):
         sys.argv.append('--help')
         args = parser.parse_args()
+
+    if(_move == True and (_ra == '' or _dec == '')):
+        sys.argv.append('--help')
+        args = parser.parse_args()
+
+    if _negdec == True:
+        _dec = "-" + _dec
 
     hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
     conn = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
@@ -198,10 +253,13 @@ if __name__ == "__main__":
         rname = rname + rtuple
 
     for ifile in rname:
+	print ifile
         if _psf:
             ofile = ifile.replace('e91','e93')
         else:
             ofile = ifile.replace('e91','e92')
+        if _move == True:
+            ofile = ofile.replace('.fits','.moved.fits')
         if _magnitude == None:
             magnitude = choosemagnitude()
         else:
@@ -219,22 +277,33 @@ if __name__ == "__main__":
         ifilep = filepath + ifile
         ofilep = filepath + ofile
 
+        if _ra != '':
+            ra = _ra
+        else:
+            ra = rcomb["photlcoraw.cat_ra"]
+
+        if _dec != '':
+            dec = _dec
+        else:
+            dec = rcomb["photlcoraw.cat_dec"]
+
+
         preexistrow =  lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
         if preexistrow:
             if _force == False and comparefakesourcemagnitude(ofilep,magnitude) == True:
                 print ofile, "already created with magnitude of", magnitude
             else:
-                lsc.mysqldef.deleteredufromarchive(ofile)
+                lsc.mysqldef.deleteredufromarchive(ofile,"photlcoraw")
+                lsc.mysqldef.deleteredufromarchive(ofile,"photlco")
                 print "Deleted old", ofile, "from archive"
                 print "Dropping source into", ofile
-                source_drop(ifilep, ofilep, rcomb["photlcoraw.cat_ra"],
-                    rcomb["photlcoraw.cat_dec"],rcomb["photlco.fwhm"],
-                    rcomb["photlco.z1"],magnitude,_psf)
+                source_drop(ifilep, ofilep, ra, dec,rcomb["photlco.fwhm"],
+                    magnitude, _psf, _move)
                 db_ingest(filepath,ofile,force=True)
         else:
-                source_drop(ifilep, ofilep, rcomb["photlcoraw.cat_ra"],
-                    rcomb["photlcoraw.cat_dec"],rcomb["photlco.fwhm"],
-                    rcomb["photlco.z1"],magnitude,_psf)
+                print "Dropping source into", ofile
+                source_drop(ifilep, ofilep, ra, dec ,rcomb["photlco.fwhm"],
+                    magnitude, _psf, _move)
                 db_ingest(filepath,ofile,force=True)
 
     if _psf:
