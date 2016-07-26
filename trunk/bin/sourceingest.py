@@ -2,8 +2,14 @@
 """
 How to run it now:
 
-sourceingest.py -e YYYYMMDD-YYYYMMDD -n OBJNAME 
-runlsc.py -e YYYYMMDD-YYYYMMDD --obstype e92 e93
+sourceingest.py -e YYYYMMDD-YYYYMMDD 
+lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -s psf
+lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -s psfmag -c
+lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -n OBJNAME -s zcat --zcatnew
+lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -s mag
+
+If you use --move, you must use --RAS and --DEC in lscloop.py
+-s psfmag. Otherwise, it won't chose the new source.
 
 """
 import os
@@ -37,24 +43,8 @@ def comparefakesourcemagnitude(ofilep, magnitude):
     return(header1['FAKEMAG'] == magnitude)
 
 
-def findzeropoint(ifilep):
-    filters1 = {'B': 'B', 'gp': 'g', 'I': 'I', 'ip': 'i', 'R': 'R', 'U': 'U',
-                'landolt': 'landolt', 'V': 'V', 'zs': 'z', 'rp': 'r',
-                'up': 'u', 'sloan': 'sloan'}
-
-    sn2 = ifilep.replace(".fits",".sn2.fits")
-    hdu = pyfits.open(sn2)
-    hdr = hdu[0].header
-    _filter = lsc.util.readkey3(hdr, 'filter')
-    zplist = []
-    for key in hdr:
-        if 'ZP' in key:
-            zplist.append(key)
-    for zp in zplist:
-        if (zp[0:3] == ('ZP' + filters1[_filter].upper())):
-            zeropoint = float(hdr[zp].split()[1])
-            break
-
+def findzeropoint(mag, psfmag):
+    zeropoint = mag - psfmag
     return zeropoint
 
 
@@ -65,18 +55,6 @@ def sexa2deg(ra,dec):
 ##############################################################################
 ##############################Drop PSF########################################
 ##############################################################################
-def gaussian2d(shape,x0,y0,sigma):
-    """
-    Creates an ndarray with a gaussian at x0, y0, with shape being the
-    shape of the ndarray.
-    
-    The use of mgrid flips rows and columns for the creation of a 2d
-    gaussian, so that's why in the first line x and y are switched.
-    """
-    y,x = np.mgrid[:shape[0],:shape[1]]
-    G = ((1/(2*pi*sigma**2))*np.exp(-((x.astype(float)-x0)**2 +(y.astype(float)-y0)**2)/(2*float(sigma**2))))
-    return G
-
 
 def createpsf(shape,xpos,ypos,ifilep):
     from iraf import daophot
@@ -113,27 +91,9 @@ def magnitude2amplitude(psf,magnitude,zeropoint,exptime):
     return amplitude
 
 
-def FWHM2sigma(arcFWHM,header):
+def source_drop(ifilep, ofilep, ra, dec, zeropoint, magnitude=None, _move=False):
     """
-    Converts arcsec FWHM to pixel sigma.
-    """
-    if 'PIXSCALE' in header:
-        scale = float(header['PIXSCALE'])
-    elif 'CCDSCALE' in header:
-        if 'CCDXBIN' in header:
-            scale = header['CCDSCALE'] * float(header['CCDXBIN'])
-        elif 'CCDSUM' in header:
-            scale = header['CCDSCALE'] * int(string.split(lsc.util.readkey3(hdr, 'CCDSUM'))[0])
-	
-    coordFWHM = arcFWHM/scale
-    coordsig = coordFWHM/((2*(2*np.log(2))**.5))
-
-    return coordsig
-
-
-def source_drop(ifilep, ofilep, ra, dec, fwhm, magnitude=None, _psf=False, _move=False):
-    """
-    Copies ifile into ofile. Drops a gaussian source into ofile, depending
+    Copies ifile into ofile. Drops a psf into ofile, depending
     if magnitude exists. Then to all ofile 'FAKEMAG' is added to the header
     to describe the magnitude of the dropped source. If there is no
     magnitude, the 'FAKEMAG' header will be set as an empty string.
@@ -142,7 +102,6 @@ def source_drop(ifilep, ofilep, ra, dec, fwhm, magnitude=None, _psf=False, _move
     inimage = HDU[0].data
     hdr = HDU[0].header
     shape = inimage.shape
-    zeropoint = findzeropoint(ifilep)
 
     if _move == True:
         hdr['RA'] = hdr['CAT-RA'] = hdr['OFST-RA'] = ra
@@ -150,32 +109,30 @@ def source_drop(ifilep, ofilep, ra, dec, fwhm, magnitude=None, _psf=False, _move
         HDU[0].header = hdr
 
         ra, dec = sexa2deg(ra,dec)
-    print "Use this RAS and DECS for lscloop.py -s psfmag:", ra, dec
+        print '#'*75
+        print 'Use this RAS and DECS for lscloop.py -s psfmag:', ra, dec,
+        print '#'*75
 
     if magnitude != None:
         xpos, ypos = degs2coords(ra,dec,hdr)	
         exptime = hdr["exptime"]
-        coordsigma  = FWHM2sigma(fwhm,hdr)
 
-        if _psf:
-            psf = createpsf(shape,xpos,ypos,ifilep)
-        else:
-            psf = gaussian2d(shape, xpos, ypos, coordsigma)
+        psf = createpsf(shape,xpos,ypos,ifilep)
         psf = psf * magnitude2amplitude(psf,magnitude,zeropoint,exptime)
         outimage = inimage + psf
 
     HDU[0].data = outimage
     HDU[0].header.set("FAKEMAG", magnitude,
-                           "If #s, then magnitude. Else, no fake source")
+                      "If #s, then magnitude. Else, no fake source")
     HDU.writeto(ofilep, clobber = True)
     HDU.close()
     del HDU
 
 ##############################################################################
-description='Creates e92/e93 files with e92 files having a perfect gaussian '\
-            'and e93 files having a psf based of the e91 file.'
+description='Creates e93 files where e93 files have an inserted psf based'\
+            'off of the e91 file.'
 usage='%(prog)s -e epoch [-f filename -m magnitude]'
-version='%(prog)s 0.3'
+version='%(prog)s 1.0'
 
 if __name__ == "__main__":	
     from argparse import ArgumentParser
@@ -189,8 +146,6 @@ if __name__ == "__main__":
     parser.add_argument("-e", "--epoch", dest="epoch", default='', type=str,
                       help='epoch to reduce  \t [%(default)s]')
     parser.add_argument("-F", "--force", dest="force", action="store_true")
-    parser.add_argument("-p","--psf",dest="psf",action="store_true",
-                        default=False, help="Use residuals when making PSF")
     parser.add_argument("--move",dest="move",action="store_true",
                         default=False, help="Move the placed source")
     parser.add_argument("--ra", dest="ra", default='', type=str,
@@ -206,7 +161,6 @@ if __name__ == "__main__":
     _name = args.name
     _epoch = args.epoch
     _force = args.force
-    _psf = args.psf
     _move = args.move
     _ra = args.ra
     _dec = args.dec
@@ -253,11 +207,8 @@ if __name__ == "__main__":
         rname = rname + rtuple
 
     for ifile in rname:
-	print ifile
-        if _psf:
-            ofile = ifile.replace('e91','e93')
-        else:
-            ofile = ifile.replace('e91','e92')
+        print '#'* 75, '\n', ifile
+        ofile = ifile.replace('e91','e93')
         if _move == True:
             ofile = ofile.replace('.fits','.moved.fits')
         if _magnitude == None:
@@ -287,6 +238,7 @@ if __name__ == "__main__":
         else:
             dec = rcomb["photlcoraw.cat_dec"]
 
+        zeropoint = findzeropoint(rcomb["photlco.mag"],rcomb["photlco.psfmag"])
 
         preexistrow =  lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
         if preexistrow:
@@ -296,18 +248,19 @@ if __name__ == "__main__":
                 lsc.mysqldef.deleteredufromarchive(ofile,"photlcoraw")
                 lsc.mysqldef.deleteredufromarchive(ofile,"photlco")
                 print "Deleted old", ofile, "from archive"
-                print "Dropping source into", ofile
-                source_drop(ifilep, ofilep, ra, dec,rcomb["photlco.fwhm"],
-                    magnitude, _psf, _move)
+                print "Dropping source into", ofile, '\n'
+                source_drop(ifilep, ofilep, ra, dec, zeropoint,
+                            magnitude, _move)
                 db_ingest(filepath,ofile,force=True)
         else:
-                print "Dropping source into", ofile
-                source_drop(ifilep, ofilep, ra, dec ,rcomb["photlco.fwhm"],
-                    magnitude, _psf, _move)
+                print "Dropping source into", ofile, '\n'
+                source_drop(ifilep, ofilep, ra, dec, zeropoint,
+                            magnitude, _move)
                 db_ingest(filepath,ofile,force=True)
 
-    if _psf:
-        os.system('lscingestredudata.py --obstype e93 -m ' + epoch + name)
-    else:
-        os.system('lscingestredudata.py --obstype e92 -m ' + epoch + name)
+
+    print '\n',('#' * 75)
+    command = 'lscingestredudata.py --obstype e93 -m ' + epoch + name
+    print command, '\n'
+    os.system(command)
 
