@@ -684,7 +684,9 @@ def absphot(img,_field,_catalogue,_fix,_color,rejection,_interactive,_type='fit'
 #################################################################
 #################### new zero point calculation #################
 def fitcol3(colors, deltas, dcolors=None, ddeltas=None, fixedC=None, filt='', col='Color', show=False, interactive=False, clipsig=2, extra=False):
-    if interactive: global keep, Z, dZ, C, dC
+    if interactive:
+        global keep, Z, dZ, C, dC
+        plt.cla()
     if fixedC is None:
         # fit Theil-Sen line and find outliers
         C, Z, _, _ = stats.theilslopes(deltas, colors) # delta = calibrated mag - instrumental mag
@@ -711,8 +713,9 @@ def fitcol3(colors, deltas, dcolors=None, ddeltas=None, fixedC=None, filt='', co
             keep[i] = not keep[i] # toggle rejection
             print
             Z, dZ, C, dC = calcZC(colors, deltas, dcolors, ddeltas, fixedC, filt, col, show=True, guess=[Z, C])
-        plt.gcf().canvas.mpl_connect('pick_event', onpick)
+        cid = plt.gcf().canvas.mpl_connect('pick_event', onpick)
         raw_input('Press enter to continue.')
+        plt.gcf().canvas.mpl_disconnect(cid)
     elif fixedC is None and C > 0.3: # if the color term is too crazy, use fixed color term
         if filt=='g': fixedC = 0.1
         else:         fixedC = 0
@@ -739,17 +742,25 @@ def calcZC(colors, deltas, dcolors=None, ddeltas=None, #keep=None,
         dZ, dC = myoutput.sd_beta
         x_reg = myoutput.xplus
         y_reg = myoutput.y
-    else:
-        Z, sum_of_weights = np.average(deltas[keep], weights=ddeltas[keep]**-2, returned=True)
+    elif np.any(keep):
+        Z, sum_of_weights = np.average(deltas[keep] - fixedC * colors[keep], weights=1/(ddeltas[keep]**2 + dcolors[keep]**2), returned=True)
         dZ = sum_of_weights**-0.5
         C, dC = fixedC, 0
+    else:
+        Z, C = guess
+        dZ, dC = 0, 0
     print 'zero point = {:5.2f} +/- {:4.2f}'.format(Z, dZ)
     print 'color term = {:5.2f} +/- {:4.2f}'.format(C, dC)
     if show:
+        if not plt.gca().get_autoscale_on():
+            lims = plt.axis()
+        else:
+            lims = [None, None, None, None]
         plt.cla()
         plt.scatter(colors, deltas, marker='.', picker=5)
         plt.errorbar(colors[keep], deltas[keep], xerr=dcolors[keep], yerr=ddeltas[keep], color='g', marker='o', linestyle='none')
         plt.errorbar(colors[~keep], deltas[~keep], xerr=dcolors[~keep], yerr=ddeltas[~keep], color='r', marker='o', linestyle='none')
+        plt.axis(lims)
         plt.autoscale(False)
         xx = np.array(plt.axis()[0:2])
         yy = Z + C*xx
