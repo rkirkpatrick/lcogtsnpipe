@@ -1177,6 +1177,19 @@ def getlike(conn, table, column, value,column2='*'):
    return resultSet
 
 ##################################################################
+def sqlquery(conn,query):
+    import MySQLdb,os
+    tuplea =()
+    try:
+        cursor = conn.cursor(MySQLdb.cursors.DictCursor)
+        cursor.execute(query)
+        tuplea = cursor.fetchall()
+        if cursor.rowcount == 0:
+            pass
+        cursor.close()
+    except MySQLdb.Error, e:
+        print "Error %d: %s" % (e.args[0], e.args[1])
+    return tuplea
 
 def query(command,conn):
    import MySQLdb,os,string
