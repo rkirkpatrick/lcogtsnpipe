@@ -363,8 +363,11 @@ if __name__ == "__main__":
                                                'TEMPLATE': (imgtemp_path, 'template image'),
                                                'DIFFIM': (imgout, 'Difference Image'),
                                                'NREGION': (1, 'Number of independent regions'),
-                                               'MASKVAL': (1e-30, 'Value of Masked Pixels')}
+                                               'MASKVAL': (1e-30, 'Value of Masked Pixels'),
+                                               'CONVOL00': ('TEMPLATE', 'which image was convolved for each region')}
+
                             lsc.util.updateheader(imgout, 0,  hotpants_fields)
+
 
                         else:
                             line = ('hotpants -inim ' + imgtarg + ' -tmplim ' + imgtemp + ' -outim ' + imgout +

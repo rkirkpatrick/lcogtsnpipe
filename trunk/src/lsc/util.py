@@ -18,7 +18,7 @@ elif host in ['supernova.lco.gtn', 'griffin-linux.lco.gtn', 'griffin-Aspire-M5-5
 elif host in ['intern1.lco.gtn']:
     workdirectory = '/home/rkirkpatrick/seatide/'
     configfile = 'configure'
-elif host == 'astrointern.lco.gtn':
+elif host in ['astrointern.lco.gtn']:
     workdirectory = '/home/dguevel/snwd/'
     configfile = 'configure'
 else:
