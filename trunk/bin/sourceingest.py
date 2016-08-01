@@ -43,8 +43,9 @@ def comparefakesourcemagnitude(ofilep, magnitude):
     return(header1['FAKEMAG'] == magnitude)
 
 
-def findzeropoint(mag, psfmag):
-    zeropoint = mag - psfmag
+def findzeropoint(mag, psfmag, airmass):
+    filter = 0.203
+    zeropoint = mag - psfmag + (airmass * filter)
     return zeropoint
 
 
@@ -110,16 +111,17 @@ def source_drop(ifilep, ofilep, ra, dec, zeropoint, magnitude=None, _move=False)
 
         ra, dec = sexa2deg(ra,dec)
         print '#'*75
-        print 'Use this RAS and DECS for lscloop.py -s psfmag:', ra, dec,
+        print 'Use this RAS and DECS for lscloop.py -s psfmag:', ra, dec
         print '#'*75
 
     if magnitude != None:
         xpos, ypos = degs2coords(ra,dec,hdr)	
         exptime = hdr["exptime"]
-
         psf = createpsf(shape,xpos,ypos,ifilep)
         psf = psf * magnitude2amplitude(psf,magnitude,zeropoint,exptime)
         outimage = inimage + psf
+    else:
+        outimage = inimage
 
     HDU[0].data = outimage
     HDU[0].header.set("FAKEMAG", magnitude,
@@ -238,8 +240,8 @@ if __name__ == "__main__":
         else:
             dec = rcomb["photlcoraw.cat_dec"]
 
-        zeropoint = findzeropoint(rcomb["photlco.mag"],rcomb["photlco.psfmag"])
-
+        zeropoint = findzeropoint(rcomb["photlco.mag"],rcomb["photlco.psfmag"],rcomb["photlco.airmass"])
+        print zeropoint
         preexistrow =  lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
         if preexistrow:
             if _force == False and comparefakesourcemagnitude(ofilep,magnitude) == True:
@@ -248,7 +250,7 @@ if __name__ == "__main__":
                 lsc.mysqldef.deleteredufromarchive(ofile,"photlcoraw")
                 lsc.mysqldef.deleteredufromarchive(ofile,"photlco")
                 print "Deleted old", ofile, "from archive"
-                print "Dropping source into", ofile, '\n'
+                print "Dropping source of magnitude", magnitude, " into", ofile, '\n'
                 source_drop(ifilep, ofilep, ra, dec, zeropoint,
                             magnitude, _move)
                 db_ingest(filepath,ofile,force=True)
