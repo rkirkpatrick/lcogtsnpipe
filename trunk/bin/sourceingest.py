@@ -43,9 +43,12 @@ def comparefakesourcemagnitude(ofilep, magnitude):
     return(header1['FAKEMAG'] == magnitude)
 
 
-def findzeropoint(mag, psfmag, airmass):
-    filter = 0.203
-    zeropoint = mag - psfmag + (airmass * filter)
+def findzeropoint(z1, z2, zcol1, zcol2):
+    zeropoint = 23
+    if zcol1 == "gr":
+        zeropoint = z1
+    if zcol2 == "gr":
+        zeropoint = z2
     return zeropoint
 
 
@@ -86,13 +89,15 @@ def degs2coords(ra,dec,header):
 
 #m =-2.5log(counts/exptime) + zp
 #counts = amplitude * G.sum
-def magnitude2amplitude(psf,magnitude,zeropoint,exptime):
-    counts = float((10**((magnitude - zeropoint)/-2.5))*exptime)
+def magnitude2amplitude(psf, airmass, zeropoint, magnitude, exptime):
+    filter = 0.203
+    counts = float((10**((magnitude - zeropoint + (airmass*filter))/-2.5))*exptime)
+    print counts
     amplitude = float(counts / np.sum(psf,dtype=float))
     return amplitude
 
 
-def source_drop(ifilep, ofilep, ra, dec, zeropoint, magnitude=None, _move=False):
+def source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint, magnitude=None, _move=False):
     """
     Copies ifile into ofile. Drops a psf into ofile, depending
     if magnitude exists. Then to all ofile 'FAKEMAG' is added to the header
@@ -118,7 +123,7 @@ def source_drop(ifilep, ofilep, ra, dec, zeropoint, magnitude=None, _move=False)
         xpos, ypos = degs2coords(ra,dec,hdr)	
         exptime = hdr["exptime"]
         psf = createpsf(shape,xpos,ypos,ifilep)
-        psf = psf * magnitude2amplitude(psf,magnitude,zeropoint,exptime)
+        psf = psf * magnitude2amplitude(psf, airmass, zeropoint, magnitude, exptime)
         outimage = inimage + psf
     else:
         outimage = inimage
@@ -182,7 +187,7 @@ if __name__ == "__main__":
     hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
     conn = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
     query_files = 'SELECT filename FROM photlco WHERE filename LIKE "%e91%"\
-                   AND mag != 9999 AND filetype = 1 '
+                   AND z1 != 9999 AND filetype = 1 '
 
     epoch = "-e " + _epoch
     if '-' not in str(_epoch):
@@ -240,8 +245,10 @@ if __name__ == "__main__":
         else:
             dec = rcomb["photlcoraw.cat_dec"]
 
-        zeropoint = findzeropoint(rcomb["photlco.mag"],rcomb["photlco.psfmag"],rcomb["photlco.airmass"])
-        print zeropoint
+        zeropoint = findzeropoint(rcomb["photlco.z1"],rcomb["photlco.z2"],rcomb["photlco.zcol1"],
+                                  rcomb["photlco.zcol2"])
+        airmass = rcomb["photlco.airmass"]
+
         preexistrow =  lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
         if preexistrow:
             if _force == False and comparefakesourcemagnitude(ofilep,magnitude) == True:
@@ -251,12 +258,12 @@ if __name__ == "__main__":
                 lsc.mysqldef.deleteredufromarchive(ofile,"photlco")
                 print "Deleted old", ofile, "from archive"
                 print "Dropping source of magnitude", magnitude, " into", ofile, '\n'
-                source_drop(ifilep, ofilep, ra, dec, zeropoint,
+                source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint,
                             magnitude, _move)
                 db_ingest(filepath,ofile,force=True)
         else:
                 print "Dropping source into", ofile, '\n'
-                source_drop(ifilep, ofilep, ra, dec, zeropoint,
+                source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint,
                             magnitude, _move)
                 db_ingest(filepath,ofile,force=True)
 
