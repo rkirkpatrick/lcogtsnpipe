@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 import numpy as np
-from scipy.optimize import minimize
-from scipy.stats import mode
+import scipy
 from astropy.io import fits
 from pyraf import iraf
 import time
@@ -14,7 +13,7 @@ import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
 
-def Subtract(Nf, Rf, Pnf, Prf, Df, diagnostic = False, interactive = False):
+def Subtract(Nf, Rf, Pnf, Prf, Df, normalize = 't', diagnostic = False, interactive = False):
     #open fits files
     N_hdulist=fits.open(Nf)
     R_hdulist=fits.open(Rf)
@@ -56,7 +55,8 @@ def Subtract(Nf, Rf, Pnf, Prf, Df, diagnostic = False, interactive = False):
         hdu.writeto('RDConvolve.fits', clobber = True)
 
     print 'Fitting B, gamma...'
-    #fit B using robust fitting
+
+    #fit B and gamma using robust fitting
     t0=time.time()
 
     B, gamma = FitB(N, R, Pn, Pr, sn, sr, interactive)
@@ -66,38 +66,78 @@ def Subtract(Nf, Rf, Pnf, Prf, Df, diagnostic = False, interactive = False):
     print 'Fit time: {} seconds'.format(str(round(time.time()-t0, 3)))
     print 'Subtracting images...'
 
-    N=np.subtract(N,gamma)
-    N_hat=np.fft.fft2(N)
+    NBackground = np.copy(N)
+    RBackground = np.copy(R)
+    N = np.subtract(N,gamma)
+    N_hat = np.fft.fft2(N)
 
-    #subtract images
-    D_hat=(Pr_hat*N_hat-B*Pn_hat*R_hat)/np.sqrt(sn**2*abs(Pr_hat**2)+sr**2*B**2*abs(Pn_hat**2))
-    #D=np.real(np.fft.ifft2(D_hat))
+    # make D and S
 
+    D_hat = (Pr_hat*N_hat-B*Pn_hat*R_hat)/np.sqrt(sn**2*abs(Pr_hat**2)+sr**2*B**2*abs(Pn_hat**2))
+    #D = np.real(np.fft.ifft2(D_hat))
 
-
-        #import matplotlib.pyplot as plt
-        #plt.scatter(DConvN.reshape(DConvN.size,1), DConvR.reshape(DConvR.size,1))
-        #print np.polyfit(DConvN.reshape(1, DConvN.size), DConvR.reshape(1, DConvR.size), 1)
-        #plt.show()
 
     Fd = B / np.sqrt(sn**2 + sr**2*B**2)
     Pd_hat = B * Pr_hat * Pn_hat / (Fd * np.sqrt(sn**2*abs(Pr_hat**2)+sr**2*B**2*abs(Pn_hat**2)))
     S_hat = Fd * D_hat * np.conj(Pd_hat)
 
-    S = np.real(np.fft.ifft2(S_hat))
+    S = np.fft.ifft2(S_hat)
+
+    # correct for astrometric noise
+
+    f = open('transform')
+    for line in f:
+        if 'xrms' in line:
+            xrms = float(line.split()[1])
+        elif 'yrms' in line:
+            yrms = float(line.split()[1])
+    f.close()
+
+    denominator = sr ** 2 * B ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
+    Kr_hat = B ** 2 * np.conj(Pr_hat) * abs(Pn_hat) ** 2 / denominator
+    Kn_hat = B * np.conj(Pn_hat) * abs(Pr_hat) ** 2 / denominator
+
+    Sn_hat = Kn_hat * N_hat
+    Sr_hat = Kr_hat * R_hat
+
+    Sn = np.real(np.fft.ifft2(Sn_hat))
+    Sr = np.real(np.fft.ifft2(Sr_hat))
+
+    SrGrad = np.gradient(Sr)
+    SnGrad = np.gradient(Sn)
+
+    Vr_ast = xrms ** 2 * SrGrad[1] ** 2 + yrms ** 2 * SrGrad[0] ** 2
+    Vn_ast = xrms ** 2 * SnGrad[1] ** 2 + yrms ** 2 * SnGrad[0] ** 2
+
+    # correct for source noise
+    RDNoiseR = fits.getheader(Nf)['RDNOISE']
+    RDNoiseN = fits.getheader(Rf)['RDNOISE']
+
+    V_epsN_hat = np.fft.fft2(np.add(NBackground, RDNoiseN ** 2))
+    V_epsR_hat = np.fft.fft2(np.add(RBackground, RDNoiseR ** 2))
+
+    Kn2_hat = np.fft.fft2(np.fft.ifft2(Kn_hat) ** 2)
+    Kr2_hat = np.fft.fft2(np.fft.ifft2(Kr_hat) ** 2)
+
+    V_Sn = np.fft.ifft2(V_epsN_hat * Kn2_hat)
+    V_Sr = np.fft.ifft2(V_epsR_hat * Kr2_hat)
+
+    Snoise = np.sqrt(V_Sn + V_Sr + Vr_ast + Vn_ast)
+    #plt.imshow(S, interpolation = 'none', cmap = 'gray', vmax = np.percentile(Snoise, 90), vmin = np.percentile(Snoise, 10))
+    #plt.show()
+    Scorr = S / Snoise
+    print np.median(Vr_ast), np.median(Vn_ast), np.median(V_Sn), np.median(V_Sr)
 
 
-    hdu = fits.PrimaryHDU(S)
+    hdu = fits.PrimaryHDU(np.real(Scorr))
     hdu.header=N_hdulist[0].header
     hdu.writeto(Df)
 
     print 'Done!'
-    return S
+    return Scorr
 
 
-
-def FitB(N, R, Pn, Pr, sn, sr, interactive):
-    simple = True
+def FitB(N, R, Pn, Pr, sn, sr, interactive, local = False):
 
     if interactive:
 
@@ -141,73 +181,8 @@ def FitB(N, R, Pn, Pr, sn, sr, interactive):
                 break
         gamma = gamma * np.sqrt(sn**2 + beta ** 2 *sr**2)
 
-    elif simple:
 
-        beta_tol = 0.01
-        gamma_tol = 0.01
-        beta = 1.
-        gamma = 0.
-        beta0 = 10e5
-        gamma0 = 10e5
-        i = 0
-        b = []
-        g = []
-        maxiter = 7
-
-        N_hat=np.fft.fft2(N)    
-        R_hat=np.fft.fft2(R)
-        Pr_hat=np.fft.fft2(Pr)
-        Pn_hat=np.fft.fft2(Pn)
-
-        while abs(beta - beta0) > beta_tol or abs(gamma - gamma0) > gamma_tol:
-            i += 1
-            print 'Iteration {}:'.format(i)
-
-
-            Dn_hat = Pr_hat*N_hat/np.sqrt(sn**2*abs(Pr_hat**2)+beta**2*sr**2*abs(Pn_hat)**2)
-            Dr_hat = Pn_hat*R_hat/np.sqrt(sn**2*abs(Pr_hat**2)+beta**2*sr**2*abs(Pn_hat)**2)
-            Dn = np.real(np.fft.ifft2(Dn_hat)).flatten()
-            Dr = np.real(np.fft.ifft2(Dr_hat)).flatten()
-            intersect = np.intersect1d(np.where(Dn >  5 * np.std(Dn)), np.where(Dr > 5 * np.std(Dr)))
-            Dn = Dn[intersect]
-            Dr = Dr[intersect]
-
-            index = np.random.randint(0, Dn.size, size = (Dn.size/4, 1))
-                    
-            beta0, gamma0 = beta, gamma
-
-            #s = [int(c / 2) for c in Dn.shape]
-            #d = 25
-            #y = Dn[s[0] - d:s[0] + d, s[0] - d:s[0] + d].flatten()
-            #x = sm.add_constant(Dr[s[0] - d:s[0] + d, s[0] - d:s[0] + d].flatten())
-            x = sm.add_constant(Dr[index])
-            y = Dn[index]
-
-            
-            fi = sm.RLM(y, x, M = sm.robust.norms.TrimmedMean(c=np.median(Dn - Dr) / 2)).fit()
-            par = fi.params
-
-            beta = par[1]
-            gamma = par[0]
-            print beta, gamma
-            #plt.plot(Dr.flatten()[index], Dn.flatten()[index], 'bo', Dr.flatten()[index], fi.fittedvalues, 'r-')
-            #plt.show()
-            g.append(gamma)
-            b.append(beta)
-
-            if i == maxiter: 
-                beta = np.mean(b)
-                gamma = np.mean(g)
-                break
-
-        print 'Fit done in {} iterations'.format(i)
-        plt.plot(range(len(b)), b, 'g', range(len(g)), g, 'r')
-        plt.show()
-
-        gamma = gamma * np.sqrt(sn**2 + beta ** 2 *sr**2)
-
-
-    else:
+    elif local:
         out_fits = fits.PrimaryHDU(N)
         out_fits.writeto('TestFit.fits', clobber = True)
         xpix, ypix, fw, cl, cm, ell, bkg, fl = sextractor('TestFit.fits')
@@ -309,9 +284,104 @@ def FitB(N, R, Pn, Pr, sn, sr, interactive):
 
 
 
+    else:
+
+        beta_tol = 0.05
+        gamma_tol = 0.01
+        beta = 1.
+        gamma = 0.
+        beta0 = 10e5
+        gamma0 = 10e5
+        i = 0
+        b = []
+        g = []
+        maxiter = 10
+
+        N_hat=np.fft.fft2(N)    
+        R_hat=np.fft.fft2(R)
+        Pr_hat=np.fft.fft2(Pr)
+        Pn_hat=np.fft.fft2(Pn)
+
+        while abs(beta - beta0) > beta_tol or abs(gamma - gamma0) > gamma_tol:
+
+
+
+            Dn_hat = Pr_hat*N_hat/np.sqrt(sn**2*abs(Pr_hat**2)+beta**2*sr**2*abs(Pn_hat)**2)
+            Dr_hat = Pn_hat*R_hat/np.sqrt(sn**2*abs(Pr_hat**2)+beta**2*sr**2*abs(Pn_hat)**2)
+            Dn = np.real(np.fft.ifft2(Dn_hat))
+            Dr = np.real(np.fft.ifft2(Dr_hat))
+            Dnx = Dn.flatten()
+            Drx = Dr.flatten()
+            intersect = np.intersect1d(np.where(Dnx >  5 * np.std(Dnx)), np.where(Drx > 5 * np.std(Drx)))
+            Dnx = Dnx[intersect]
+            Drx = Drx[intersect]
+
+            index = np.random.randint(0, Dnx.size, size = (Dnx.size/4, 1))
+                    
+            beta0, gamma0 = beta, gamma
+
+            #s = [int(c / 2) for c in Dn.shape]
+            #d = 25
+            #y = Dn[s[0] - d:s[0] + d, s[0] - d:s[0] + d].flatten()
+            #x = sm.add_constant(Dr[s[0] - d:s[0] + d, s[0] - d:s[0] + d].flatten())
+            x = sm.add_constant(Drx[index])
+            y = Dnx[index]
+
+            
+            fi = sm.RLM(y, x, M = sm.robust.norms.TrimmedMean(c=np.median(Dn - Dr) / 2)).fit()
+            par = fi.params
+
+            beta = par[1]
+            gamma = par[0]
+            i += 1
+            print 'Iteration {}:'.format(i)
+            print beta, gamma
+            #plt.plot(Dr.flatten()[index], Dn.flatten()[index], 'bo', Dr.flatten()[index], fi.fittedvalues, 'r-')
+            #plt.show()
+            g.append(gamma)
+            b.append(beta)
+
+
+
+            if i == maxiter: 
+                beta = np.mean(b)
+                gamma = np.mean(g)
+                break
+
+        #out_fits = fits.PrimaryHDU(Dn)
+        #out_fits.writeto('TestFit.fits', clobber = True)
+        #xpix, ypix, fw, cl, cm, ell, bkg, fl = sextractor('TestFit.fits')
+        #system('rm TestFit.fits')
+        #DnCoords = np.transpose(np.array([[int(xpix[i]), int(ypix[i]), 1] for i in range(len(xpix))]))
+
+        #out_fits = fits.PrimaryHDU(Dr)
+        #out_fits.writeto('TestFit.fits', clobber = True)
+        #xpix, ypix, fw, cl, cm, ell, bkg, fl = sextractor('TestFit.fits')
+        #system('rm TestFit.fits')
+        #DrCoords = np.transpose(np.array([[int(xpix[i]), int(ypix[i]), 1] for i in range(len(xpix))]))
+
+        AffinePar = [1., 0., 0., 1.]
+        #m = scipy.optimize.minimize(Diff, AffinePar, args = (Dn, Dr, beta, gamma))
+        #print m
+        #m.x = AffinePar
+        #plt.imshow(Diff(AffinePar, Dn, Dr, beta, gamma), interpolation = 'none')
+        #plt.show()
+        
+
+        print 'Fit done in {} iterations'.format(i)
+        #plt.plot(range(len(b)), b, 'g', range(len(g)), g, 'r')
+        #plt.show()
+
+        gamma = gamma * np.sqrt(sn**2 + beta ** 2 *sr**2)
+
+
     return beta, gamma
 
-
+def Diff(AffinePar, Dn, Dr, beta, gamma):
+    ap = AffinePar
+    AffineMatrix = np.array([[ ap[0], ap[1] ], [ ap[2], ap[3] ]])
+    scipy.ndimage.interpolation.affine_transform(Dn, AffineMatrix, mode = 'constant').shape, Dr.shape
+    return np.sum(scipy.ndimage.interpolation.affine_transform(Dn, AffineMatrix, mode = 'constant') - Dr * beta - gamma * np.ones(Dr.shape))
 
 def CropImages(N,R,Pn,Pr):
     if N.shape[0]<=R.shape[0] & N.shape[1]<=R.shape[1]:
