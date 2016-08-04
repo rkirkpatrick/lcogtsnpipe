@@ -132,6 +132,7 @@ def updatevalue(table,column,value,filename,connection='lcogt2',filename0='filen
       resultSet = cursor.fetchall ()
       if cursor.rowcount == 0:
          pass
+      conn.commit()
       cursor.close ()
    except MySQLdb.Error, e:
       print "Error %d: %s" % (e.args[0], e.args[1])
