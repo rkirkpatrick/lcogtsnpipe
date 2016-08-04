@@ -205,6 +205,10 @@ if __name__ == "__main__":
                                             fitgeom="general", functio="legendre", xxor=num, xyor=num, xxterms="half",
                                             yxor=num, yyor=num, yxterms="half", calctype="real", inter='No')
 
+                        iraf.immatch.geomap('tmpcoo', "transform", 1, hdtar['NAXIS1'], 1, hdtar['NAXIS2'],
+                                            fitgeom="general", functio="legendre", xxor=num, xyor=num, xxterms="half",
+                                            yxor=num, yyor=num, yxterms="half", calctype="real", inter='No')
+
                         imgtemp = '_temp.fits'
                         imgtarg = '_targ.fits'
                         imgout = '_out.fits'
@@ -218,6 +222,7 @@ if __name__ == "__main__":
                         lsc.util.delete('tempmask.fits')
                         iraf.imcopy(_dir + imgtarg0, imgtarg, verbose='yes')
                         iraf.imcopy(_dir + targmask0, targmask, verbose='yes')
+
 #                        try:
                         iraf.immatch.gregister(_dirtemp + imgtemp0, imgtemp, "tmp$db", "tmpcoo", geometr="geometric",
                                                interpo=_interpolation, boundar='constant', constan=0, flux='yes', verbose='yes')
