@@ -358,10 +358,8 @@ if __name__ == "__main__":
                             _afssc = ''
 
                         if _optimal:
-                            from lsc import OptimalSub
-                            psftarg = imgtarg_path.replace('.fits','.psf.fits')
-                            psftemp = imgtemp_path.replace('.fits','.psf.fits')
-                            OptimalSub.Subtract(imgtarg, imgtemp, psftarg, psftemp, imgout)
+                            from lsc.OptimalSub import OptimalSubtraction
+                            OptimalSub.OptimalSubtraction(imgtarg, imgtemp, imgout)
                             # create fields that hotpants does automatically
                             hotpants_fields = {'PHOTNORM': (normalize, 'Direction of photometric normalization'),
                                                'TARGET': (imgtarg_path, 'target image'),
