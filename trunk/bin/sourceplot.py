@@ -9,7 +9,7 @@ import matplotlib.mlab as mlab
 
 import lsc
 description = "Displays a plot of the data of fake sources within magcomparison"
-usage = "%(prog)s -e epoch [-g graph -n objname -m magnitude]"
+usage = "%(prog)s [-e epoch -g graph -n objname -m magnitude]"
 version = "0.1"
 
 def updateoutliers(resultSet,_magnitude):
@@ -52,35 +52,49 @@ def updateoutliers(resultSet,_magnitude):
 
     print "Outliers have been updated", '\n', '#' * 75
 
-
 def len2shape(pltlength):
-    #find different shapes that would work
+    # find different shapes that would work
+    if pltlength > 81 or pltlength <= 0:
+        print "pltlength needs to be less than 81 and greater than 0"
+        return "01"
+    shape = []
+    for i in range(1, pltlength + 1):
+        if ((pltlength) % i) == 0:
+            if i > 9 or (pltlength / i) > 9:
+                pass
+            else:
+                shape.append(str(i) + str(pltlength / i))
+
     #choose shape with smallest difference between two parts
-    pass
+    if pltlength == 0:
+        print "Your input length was 0"
+        shape = "00"
+    elif len(shape) == 0:
+        if pltlength < 81 or pltlength > 0:
+            shape = len2shape(pltlength + 1)
+    else:
+        mindiff = abs(int(shape[0][0]) - int(shape[0][1]))
+        mindiffindex = 0
+        for i in range(len(shape)):
+            if abs(int(shape[i][0]) - int(shape[i][1])) < mindiff:
+                mindiff = abs(int(shape[i][0]) - int(shape[i][1]))
+                mindiffindex = i
+        shape = shape[mindiffindex]
+    return shape
 
 
-
-def makehistogram(oneset, inmag, mean, stddev):
-    num_bins = 15
-    # the histogram of the data
-    n, bins, patches = plt.hist(oneset, num_bins, normed=1, facecolor='blue', alpha=0.5)
-    # add a 'best fit' line
-    y = mlab.normpdf(bins, mean, stddev)
-    plt.plot(bins, y, 'r--')
-    plt.xlabel("Difference Apparent Magnitudes")
-    plt.ylabel('Probability')
-    plt.title(r'Histogram of Input Magnitude:' + str(inmag))
-
-    # Tweak spacing to prevent clipping of ylabel
-    plt.subplots_adjust(left=0.15)
+def shape2rc(shape):
+    row = int(shape[0])
+    col = int(shape[1])
+    return row, col
 
 
-def varstats(listofmagnitudes, datasets):
+def varstats(_magnitude, dataset):
     means = []
     stddevs = []
-    for i in range(len(listofmagnitudes)):
-        means.append(np.mean(datasets[i]))
-        stddevs.append(np.std(datasets[i]))
+    for i in range(len(_magnitude)):
+        means.append(np.mean(dataset[i]))
+        stddevs.append(np.std(dataset[i]))
 
     return means, stddevs
 
@@ -119,13 +133,9 @@ if __name__ == "__main__":
 
     # Set query based on arguments
     query = "SELECT * from magcomparison "
-
-    if (_epoch == ''):
-        sys.argv.append('--help')
-        args = parser.parse_args()
-
-    epoch = "-e " + _epoch
-    if '-' not in str(_epoch):
+    if str(_epoch) == '':
+        query += ' WHERE id > 1 '
+    elif '-' not in str(_epoch):
         query += ' WHERE dayobs = {0} '.format(_epoch)
     else:
         epoch1, epoch2 = _epoch.split('-')
@@ -210,28 +220,59 @@ if __name__ == "__main__":
 
     # If user wants a histogram
     elif _graph == "histogram":
-        means, stddevs = varstats(_magnitude,dataset)
-        for i in range(len(_magnitude)):
-            makehistogram(dataset[i], _magnitude[i], means[i], stddevs[i])
+        shape = len2shape(len(_magnitude))
+        row, col = shape2rc(shape)
+        fig, axes = plt.subplots(nrows=row, ncols=col, figsize=(12, 7))
+        fig.tight_layout()
+
+        means, stddevs = varstats(_magnitude, dataset)
+
+        ii = 0
+        for i in range(row):
+            if row == 1:
+                axis = axes
+                if col == 1:
+                    axis = [axis]
+            else:
+                axis = axes[i]
+            for ax in axis:
+                if ii < len(_magnitude):
+                    n, bins, patches = ax.hist(dataset[ii], bins=20)
+                    xlabel = "Input Mag: " + str(_magnitude[ii])
+                    ax.set_xlabel(xlabel)
+                    ax.set_ylabel("Number of data points in bin")
+
+                    if _bestfit == True:
+                        #[WIP]
+                        y = mlab.normpdf(bins, means[ii], stddevs[ii])
+                        ax.plot(bins, y, 'r--')
+                    ii += 1
 
 
 
     # If user wants a boxplot
     elif _graph == "boxplot":
-        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(12, 7))
+        shape = len2shape(len(_magnitude))
+        row, col = shape2rc(shape)
+        fig, axes = plt.subplots(nrows=row, ncols=col, figsize=(12, 7))
+        fig.tight_layout()
 
-        # Rectangular box plot
-        bplot = ax.boxplot(dataset)
-
-        # Adding horizontal grid lines
-        ax.yaxis.grid(True)
-        ax.set_xticks([y + 1 for y in range(len(dataset))], )
-        ax.set_ylabel("Difference Apparent Magnitudes")
-        ax.set_xlabel("Input Apparent Magnitudes")
-
-        # Add x-tick labels
-        plt.setp(ax, xticks=[y + 1 for y in range(len(dataset))],
-                 xticklabels=_magnitude)
+        ii = 0
+        for i in range(row):
+            if row == 1:
+                axis = axes
+                if col == 1:
+                    axis = [axis]
+            else:
+                axis = axes[i]
+            for ax in axis:
+                if ii < len(_magnitude):
+                    ax.boxplot(dataset[ii])
+                    ax.yaxis.grid(True)
+                    ax.set_ylabel("Difference Mag")
+                    xlabel = "Input Mag: " + str(_magnitude[ii])
+                    ax.set_xlabel(xlabel)
+                    ii += 1
 
 
     # If user wants variable statistics for each inmag
