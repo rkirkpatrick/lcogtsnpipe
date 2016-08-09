@@ -30,6 +30,7 @@ class OptimalSubtraction:
         self.Subtract()
         self.Scorr = self.S / self.Snoise
 
+        self.SaveImageToDB()
         self.SaveImageToWD()
 
     def ExtractPSF(self, Pf):
