@@ -19,13 +19,12 @@ def updateoutliers(resultSet,_magnitude):
         maggroup.append([])
 
     for row in resultSet:
-        ii = 0
-        for inmag in _magnitude:
+        for i, inmag in enumerate(_magnitude):
             if row['inmag'] == inmag:
-                maggroup[ii].append(row)
-            ii += 1
-    mi = 0
-    for inmagrow in maggroup:
+                maggroup[i].append(row)
+
+
+    for i, inmagrow in enumerate(maggroup):
         try:
             # Find outlier range in each inmag
             diffmagset = []
@@ -35,7 +34,7 @@ def updateoutliers(resultSet,_magnitude):
             Q3 = np.percentile(diffmagset,75)
             IQR = Q3 - Q1
             outlierrange = [Q1 - (1.5 * IQR), Q3 + (1.5 * IQR)]
-            print "The outlier range for a magnitude of", _magnitude[mi], "is", outlierrange
+            print "The outlier range for a magnitude of", _magnitude[i], "is", outlierrange
 
             # Set the data outlier key accordingly & update db
             for row in inmagrow:
@@ -47,8 +46,7 @@ def updateoutliers(resultSet,_magnitude):
                 id = row['id']
                 lsc.mysqldef.updatevalue('magcomparison', 'outlier', value, id, connection="lcogt2", filename0="id")
         except:
-            print "No data for magnitude:", _magnitude[mi]
-        mi += 1
+            print "No data for magnitude:", _magnitude[i]
 
     print "Outliers have been updated", '\n', '#' * 75
 
@@ -192,11 +190,9 @@ if __name__ == "__main__":
     for inmag in _magnitude:
         dataset.append([])
     for xi in range(len(x)):
-        ii = 0
-        for inmag in _magnitude:
+        for magnumber, inmag in enumerate(_magnitude):
             if x[xi] == inmag:
-                dataset[ii].append(y[xi])
-            ii += 1
+                dataset[magnumber].append(y[xi])
 
     for i in range(len(_magnitude)):
         dataset[i] = np.array(dataset[i])
