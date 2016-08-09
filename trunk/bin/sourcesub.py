@@ -19,11 +19,20 @@ if __name__ == "__main__":
                         "Choose data from a specific magnitude", type=float)
     parser.add_argument("-e", "--epoch", dest="epoch", default='', type=str,
                         help='epoch to search for data \t [%(default)s]')
+    parser.add_argument("-r", "--redo", dest="redo", default=False,
+                        action="store_true", help="Redo psf on images and diff")
+    parser.add_argument("-f","--fwhm", dest="fwhm", default=None,
+                        help="Set the fwhm in the PSFs")
+    parser.add_argument('-o','--optimal', dest="optimal", default=False,
+                        action="store_true", help="Use optimal image differencing")
 
     args = parser.parse_args()
     _name = args.name
     _magnitude = args.magnitude
     _epoch = args.epoch
+    _redo = args.redo
+    _fwhm = args.fwhm
+    _optimal = args.optimal
 
     # Change directory
     host = socket.gethostname()
@@ -38,16 +47,26 @@ if __name__ == "__main__":
     except:
         print 'Error: Could not connect to database'
 
-    # query photlco for available images
-    query  = '''SELECT pr.objname, p.targetid, p.dayobs, p.filepath, p.wcs, p.filename, p.instrument '''
-    query += '''FROM photlco AS p, photlcoraw AS pr '''
-    query += '''WHERE pr.filename = p.filename '''
-    query += '''AND pr.propid in ('CON2015B-002','CON2016A-004') '''
-    query += '''AND p.filetype = 1 '''
-    query += '''AND p.quality = 127 '''
-    query += '''AND p.filename LIKE '%e91%' '''
-    query += '''AND p.z1 != 9999 '''
-    if '-' not in str(_epoch):
+    if _redo == False:
+        # query photlco for available images
+        query  = '''SELECT pr.objname, p.targetid, p.dayobs, p.filepath, p.wcs, p.filename, p.instrument '''
+        query += '''FROM photlco AS p, photlcoraw AS pr '''
+        query += '''WHERE pr.filename = p.filename '''
+        query += '''AND pr.propid in ('CON2015B-002','CON2016A-004') '''
+        query += '''AND p.filetype = 1 '''
+        query += '''AND p.quality = 127 '''
+        query += '''AND p.filename LIKE '%e91%' '''
+        query += '''AND p.z1 != 9999 '''
+        
+    elif _redo == True:
+        # query magcomparison for bad differences
+        query = '''SELECT * FROM magcomparison AS p '''
+        query += ''' WHERE (p.diffmag = 9999 '''
+        query += ''' OR p.outlier = 1) '''
+
+    if _epoch == '':
+        pass
+    elif '-' not in str(_epoch):
         query += ' AND p.dayobs = {0} '.format(_epoch)
     else:
         epoch1, epoch2 = _epoch.split('-')
@@ -56,14 +75,25 @@ if __name__ == "__main__":
     if _name != '':
         query += ' AND p.objname = "{0}" '.format(_name)
 
-    query += '''ORDER by p.dateobs, p.ut DESC '''
+    query += '''ORDER by p.dayobs'''
     objects = lsc.mysqldef.sqlquery(db,query)
 
     if _magnitude == []:
         _magnitude = np.arange(14,20.5,0.5)
 
-    #print objects
-    #raw_input()
+    if _redo == True and _fwhm == None:
+        fwhm = " --fwhm=7 "
+    elif _fwhm != None:
+        fwhm = " --fwhm=" + str(_fwhm)
+    else:
+        fwhm = ''
+
+    if _optimal == True:
+        optimal = " --optimal "
+    else:
+        optimal = ''
+
+    print objects
 
     for i,row in enumerate(objects):
 
@@ -71,27 +101,21 @@ if __name__ == "__main__":
         objname = row['objname'] # name of object
         targetid = row['targetid']
         dayobs = row['dayobs']
-        instrument = row['instrument']
+        if _redo == True:
+            instrument = "fl"
+        else:
+            instrument = row['instrument'][0:2]
 
         print ''
-        print '''Checking image from %(dayobs)s for target %(objname)s.''' %row
-
-        # has this image already been differenced?
-        fname = row['filename'].replace('e91','e93')
-        fpath = row['filepath']
-        diffname = fname.replace('.fits','.diff.fits')
-        if os.path.exists(fpath+diffname):
-            print "Clearing DB and deleting already differenced."
-            lsc.mysqldef.deleteredufromarchive(diffname,"photlcoraw")
-            lsc.mysqldef.deleteredufromarchive(diffname,"photlco")
-
+        print '''Checking for template images for %(dayobs)s target %(objname)s.''' %row
 
         # fix WCS if failed?
-        if row['wcs'] != 0:
-            print '''No WCS, attempting to solve.'''
-            command = 'lscloop.py -n ' + objname + ' -e ' + dayobs + ' -s wcs '
-            print command
-            os.system(command)
+        if _redo == False:
+            if row['wcs'] != 0:
+                print '''No WCS, attempting to solve.'''
+                command = 'lscloop.py -n ' + objname + ' -e ' + dayobs + ' -s wcs '
+                print command
+                os.system(command)
 
         # is there an LCOGT template?
         query  = '''SELECT filename, filepath, dayobs ,psf '''
@@ -99,7 +123,7 @@ if __name__ == "__main__":
         query += '''WHERE targetid=%s ''' %targetid
         query += '''AND instrument like '%fl%' '''
         query += '''AND filetype = 4 '''
-        query += '''AND dayobs != '%s' ''' %row['dayobs']
+        query += '''AND dayobs != '%s' ''' %dayobs
         query += '''AND filename LIKE '%e91%' '''
         query += '''ORDER BY dateobs, ut LIMIT 1 '''
         fileinfo = lsc.mysqldef.sqlquery(db,query)
@@ -112,7 +136,7 @@ if __name__ == "__main__":
             # does the template have a good PSF?
             if fileinfo[0]['psf'] == 'X':
                 print ''' Making PSF for the template:'''
-                command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf'
+                command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf' + fwhm
                 print command
                 os.system(command)
         else:
@@ -131,16 +155,16 @@ if __name__ == "__main__":
                 print ''' Found earlier LCOGT image to use as template. Will convert to template:'''
                 templatesource = 'LCOGT'
                 templatedate = fileinfo[0]['dayobs']
-                if fileinfo[0]['psf'] == 'X':
-                    print ''' Oh, this file doesn't have a PSF. Will try to make one with FHWM 7:'''
-                    command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' -s psf --fwhm=7'
+                if fileinfo[0]['psf'] == 'X' or _redo == True:
+                    print ''' Making a psf for found image'''
+                    command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' -s psf ' + fwhm
                     os.system(command)
-                    print ''' Now back to converting it to template:'''
+                    print ''' Converting image to template:'''
                 command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' -s template'
                 print command
                 os.system(command)
                 print ''' Making PSF for the template:'''
-                command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf'
+                command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf ' + fwhm
                 print command
                 os.system(command)
 
@@ -150,6 +174,12 @@ if __name__ == "__main__":
             print command
             os.system(command)
 
+        # Create a redone psf for making fake sources
+        if _redo == True:
+            print "Redoing psf on e91"
+            command = 'lscloop.py --obstype e91 -s psf ' + fwhm + ' -n ' + objname + ' -e ' + dayobs
+            print command
+            os.system(command)
 
         for i in _magnitude:
             inmag = i
@@ -162,7 +192,7 @@ if __name__ == "__main__":
 
             #create psf for fakesource image
             print ''' Creating psf for fake source image'''
-            command = 'lscloop.py --obstype e93.fits -n ' + objname + ' -e ' + dayobs + ' -s psf'
+            command = 'lscloop.py --obstype e93.fits -n ' + objname + ' -e ' + dayobs + ' -s psf ' + fwhm
             print command
             os.system(command)
 
@@ -173,7 +203,7 @@ if __name__ == "__main__":
 
             # run image subtraction
             print ''' Running image subtraction:'''
-            command = 'lscloop.py --obstype e93.fits e91 -n ' + objname + ' -e ' + dayobs + ' --tempdate ' + templatedate + ' -s diff --normalize t -T ' + instrument[0:2]
+            command = 'lscloop.py --obstype e93.fits e91 -n ' + objname + ' -e ' + dayobs + ' --tempdate ' + templatedate + ' -s diff --normalize t -T ' + instrument + optimal
             print command
             os.system(command)
 
@@ -200,23 +230,47 @@ if __name__ == "__main__":
 
 
             try:
-                # read the apparent magnitude of the difference image
-                diffmagrow = lsc.mysqldef.getfromdataraw(db,'photlco','filename',diffname,'mag')
-                diffmag = diffmagrow[0]['mag']
-                print diffmag
+                if _redo == False:
+                    # read the apparent magnitude of the difference image
+                    diffmagrow = lsc.mysqldef.getfromdataraw(db,'photlco','filename',diffname,'mag')
+                    diffmag = diffmagrow[0]['mag']
+                    print diffmag
 
-                #put values into dictionary, then insert into magcomparison db
-                valuedict = {}
-                columns = ['targetid','filepath','filename','dayobs','objname','inmag','diffmag']
-                valuedict['targetid'] = targetid
-                valuedict['filepath'] = fpath
-                valuedict['filename'] = diffname
-                valuedict['dayobs'] = dayobs
-                valuedict['objname'] = objname
-                valuedict['inmag'] = inmag
-                valuedict['diffmag'] = diffmag
-                print valuedict
-                lsc.mysqldef.insert_values(db,'magcomparison',valuedict)
+                    query = 'SELECT * FROM magcomparison WHERE filename = "{0}" and inmag = {1}'.format(diffname, inmag)
+                    preexistrow = lsc.mysqldef.sqlquery(db, query)
+                    if preexistrow:
+                        # update db with new data
+                        row = preexistrow[0]
+                        id = row['id']
+                        lsc.mysqldef.updatevalue('magcomparison', 'outlier', False, id, filename0='id')
+                        lsc.mysqldef.updatevalue('magcomparison', 'diffmag', diffmag, id, filename0='id')
+
+                    else:
+                        #put values into dictionary, then insert into magcomparison db
+                        valuedict = {}
+                        columns = ['targetid','filepath','filename','dayobs','objname','inmag','diffmag']
+                        valuedict['targetid'] = targetid
+                        valuedict['filepath'] = fpath
+                        valuedict['filename'] = diffname
+                        valuedict['dayobs'] = dayobs
+                        valuedict['objname'] = objname
+                        valuedict['inmag'] = inmag
+                        valuedict['diffmag'] = diffmag
+                        print valuedict
+                        lsc.mysqldef.insert_values(db,'magcomparison',valuedict)
+
+                if _redo == True:
+                    # read the apparent magnitude of the difference image
+                    diffname = row['filename'] # this row is from magcomparison
+                    diffmagrow = lsc.mysqldef.getfromdataraw(db, 'photlco', 'filename', diffname, 'mag')
+                    diffmag = diffmagrow[0]['mag']
+                    print diffmag
+
+                    # update db with new data
+                    id = row['id']
+                    lsc.mysqldef.updatevalue('magcomparison', 'outlier', False, id, filename0='id')
+                    lsc.mysqldef.updatevalue('magcomparison', 'diffmag', diffmag, id, filename0='id')
+                    
             except:
                 print "Something went wrong with difference image photometry"
 
