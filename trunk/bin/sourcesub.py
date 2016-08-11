@@ -115,8 +115,7 @@ if __name__ == "__main__":
     else:
         show = ''
 
-    for i,row in enumerate(objects):
-
+    for row in objects:
         # pull new image from database
         objname = row['objname'] # name of object
         targetid = row['targetid']
@@ -125,16 +124,20 @@ if __name__ == "__main__":
         fpath = row['filepath']
         diffname = row['filename']
 
+
         if _redo == False:
-            diffname = diffname.replace('e91','e93.diff')
+            if _optimal == False:
+                diffname = diffname.replace('e91','e93.diff')
+            else:
+                diffname = diffname.replace('e91','e93.optimal.diff')
 
             if _force == False:
                 magdonequery = "Select inmag from magcomparison where filename = '{0}' ".format(diffname)
                 magdoneSet = lsc.mysqldef.sqlquery(db, magdonequery)
                 magdone = []
                 magnitude = []
-                for row in magdoneSet:
-                    magdone.append(row['inmag'])
+                for magrow in magdoneSet:
+                    magdone.append(magrow['inmag'])
 
                 for inmag in _magnitude:
                     if inmag not in magdone:
@@ -231,6 +234,8 @@ if __name__ == "__main__":
                     command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf ' + tempfwhm + show
                     print command
                     os.system(command)
+                else:
+                    magnitude = []
 
             if templatedate != '':
                 print ''' Performing cosmic-ray rejection on template:'''
