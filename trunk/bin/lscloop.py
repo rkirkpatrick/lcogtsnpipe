@@ -556,5 +556,5 @@ if __name__ == "__main__":   # main program
                                                    _clean, _subtract_mag_from_header)
                     else:
                         print _stage + ' not defined'
-                    else:
+                else:
                     print '\n### no data selected'
