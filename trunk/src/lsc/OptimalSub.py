@@ -13,8 +13,10 @@ import statsmodels.api as sm
 import matplotlib.pyplot as plt
 
 class OptimalSubtraction:
-    def __init__(self, Nf, Rf, Pnf, Prf, Df):
+    def __init__(self, Nf, Rf, Pnf, Prf, Df, normalize):
 
+        self.normalize = normalize
+        self.Df = Df
         self.Nf, self.Rf = Nf, Rf
         self.Pnf, self.Prf = Pnf, Prf
         #self.RegisterImages()
@@ -28,10 +30,10 @@ class OptimalSubtraction:
         self.R = np.copy(self.Rnbs)
 
         self.Subtract()
-        self.Scorr = self.S / self.Snoise
 
         self.SaveImageToDB()
-        self.SaveImageToWD()
+        #self.SaveImageToWD()
+
 
     def ExtractPSF(self, Pf):
 
@@ -68,17 +70,20 @@ class OptimalSubtraction:
         p = Pr.shape
 
         Pr_ext = np.zeros(s)
-        Pr_ext[s[0]/2-p[0]/2-1:s[0]/2+p[0]/2,s[1]/2-p[1]/2-1:s[1]/2+p[1]/2] = Pr
-        Pr_ext = np.roll(Pr_ext, s[0]/2,0)
-        Pr_ext = np.roll(Pr_ext, s[1]/2,1)
+        Pr_ext[s[0]/2 - p[0] / 2 - 1:s[0] / 2 + p[0] / 2, s[1] / 2 - p[1] /2 -1 :s[1] / 2 + p[1] / 2] = Pr
+        Pr_ext = np.roll(Pr_ext, s[0]/2, 0)
+        Pr_ext = np.roll(Pr_ext, s[1]/2, 1)
 
         self.Nnbs, self.Rnbs, self.Pn, self.Pr = N, R, Pn_ext, Pr_ext
 
     def FitB(self):
-        N, R, Pn, Pr, sn, sr = self.Nnbs, self.Rnbs, self.Pn, self.Pr, self.sn, self.sr
+        s, d = self.Nnbs.shape[0] / 2, 500
+        a, b = s - d, s + d
+        N, R, Pn, Pr = self.Nnbs[a:b, a:b], self.Rnbs[a:b, a:b], self.Pn[0:2*d, 0:2*d], self.Pr[0:2*d, 0:2*d]
+        sn, sr = self.sn, self.sr
 
-        beta_tol = 0.01
-        gamma_tol = 0.001
+        beta_tol = 1e-5
+        gamma_tol = 1e-5
         beta = 1.
         gamma = 0.
         beta0 = 10e5
@@ -86,12 +91,14 @@ class OptimalSubtraction:
         i = 0
         b = []
         g = []
-        maxiter = 10
+        maxiter = 4
 
         N_hat=np.fft.fft2(N)    
         R_hat=np.fft.fft2(R)
         Pr_hat=np.fft.fft2(Pr)
         Pn_hat=np.fft.fft2(Pn)
+
+        #index = np.random.randint(0, N.size, size = int(1e5))
 
         while abs(beta - beta0) > beta_tol or abs(gamma - gamma0) > gamma_tol:
 
@@ -105,13 +112,12 @@ class OptimalSubtraction:
             #Dnx = Dnx[intersect]
             #Drx = Drx[intersect]
 
-            index = np.random.randint(0, Dnx.size, size = int(1e5))
             beta0, gamma0 = beta, gamma
 
-            x = sm.add_constant(Drx[index])
-            y = Dnx[index]
+            x = sm.add_constant(Drx)#[index])
+            y = Dnx#[index]
 
-            fi = sm.RLM(y, x, M = sm.robust.norms.TrimmedMean(c=np.std(Dn - Dr))).fit()
+            fi = sm.RLM(y, x, M = sm.robust.norms.RamsayE()).fit()
             par = fi.params
             beta = par[1]
             gamma = par[0]
@@ -128,6 +134,8 @@ class OptimalSubtraction:
                 beta = np.mean(b)
                 gamma = np.mean(g)
                 break
+        #plt.plot(Drx, Dnx, 'bo', Drx, fi.fittedvalues, 'r-')
+        #plt.show()
 
         print 'Fit done in {} iterations'.format(i)
         #plt.plot(range(len(b)), b, 'g', range(len(g)), g, 'r')
@@ -144,13 +152,11 @@ class OptimalSubtraction:
 
     def Subtract(self, diagnostic = False):
         N, R, Pn, Pr, sn, sr = self.N, self.R, self.Pn, self.Pr, self.sn, self.sr
-        print 'Doing subtractions'
+        print '\nDoing subtractions...'
         N_hat = np.fft.fft2(N)    
         R_hat = np.fft.fft2(R)
         Pr_hat = np.fft.fft2(Pr)
         Pn_hat = np.fft.fft2(Pn)
-
-
 
         if diagnostic:
             print 'Saving Deconvolved images'
@@ -163,53 +169,70 @@ class OptimalSubtraction:
 
         B = self.beta
 
-
-
         # correct for astrometric noise
 
-        f = open('transform')
-        for line in f:
-            if 'xrms' in line:
-                xrms = float(line.split()[1])
-            elif 'yrms' in line:
-                yrms = float(line.split()[1])
-        f.close()
+        #f = open('transform')
+        #for line in f:
+        #    if 'xrms' in line:
+        #        xrms = float(line.split()[1])
+        #    elif 'yrms' in line:
+        #        yrms = float(line.split()[1])
+        #f.close()
 
-        Den = sr ** 2 * B ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2 + 1e-8
+        Den = sr ** 2 * B ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
         SqrtDen = np.sqrt(Den)
-        Kn = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
-        Kr = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
 
-        D_hat = (Pr_hat * N_hat - B * Pn_hat * R_hat) / Den
-        self.D = np.real(np.fft.ifft2(D_hat))
-        del D_hat
+        #Kn = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
+        #Kr = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
+        #print np.sum(np.fft.ifft2(Pr_hat * N_hat)), np.sum(N), np.sum(np.fft.ifft2(B * Pn_hat * R_hat)), np.sum(B * R)
+        #Fdn = 1 / np.sqrt(sn ** 2 + sr ** 2 * B ** 2)
+        #Fdr = B / np.sqrt(sn ** 2 + sr ** 2 * B ** 2)
+        #print Fdn, Fdr
+        #D_hat = (Pr_hat * N_hat - B * Pn_hat * R_hat) / SqrtDen
+        #self.D = np.fft.ifft2(D_hat)
+
+        #self.D = self.N - np.fft.ifft2(B * R_hat * Pn_hat /  Pr_hat)
         Fd = B / np.sqrt(sn**2 + sr**2*B**2)
         Pd_hat = B * Pr_hat * Pn_hat / (Fd * np.sqrt(sn**2*abs(Pr_hat**2)+sr**2*B**2*abs(Pn_hat**2)))
+        D = np.fft.ifft2((Pr_hat * N_hat - B * Pn_hat * R_hat) / SqrtDen)
         self.Pd = np.fft.ifft2(Pd_hat)
-        del Pd_hat
+        print B, 1, Fd
 
-        self.S = np.fft.ifft2(B * Kn * N_hat - B ** 2 * Kr * R_hat)
+        normalize = self.normalize
+        if normalize == 'i':
+            self.D = D * B / Fd
+        elif normalize == 't':
+            self.D = D / Fd
+        else:
+            self.D = D
 
-        Kr2 = np.fft.fft2(np.fft.ifft2(B ** 2 * Kr) ** 2)
-        Kn2 = np.fft.fft2(np.fft.ifft2(B * Kn) ** 2)
+        #del Pd_hat, Fd#, D_hat
 
-        GradNy, GradNx = np.gradient(np.fft.ifft2(B * Kn * N_hat))
-        GradRy, GradRx = np.gradient(np.fft.ifft2(B ** 2 * Kr * R_hat))
+        #self.S = np.fft.ifft2(B * Kn * N_hat - B ** 2 * Kr * R_hat)
 
-        Vr_ast = xrms ** 2 * GradRx ** 2 + yrms ** 2 * GradRy ** 2
-        Vn_ast = xrms ** 2 * GradNx ** 2 + yrms ** 2 * GradNy ** 2
+        #Kr2 = np.fft.fft2(np.fft.ifft2(B ** 2 * Kr) ** 2)
+        #Kn2 = np.fft.fft2(np.fft.ifft2(B * Kn) ** 2)
 
-        NBackground_hat = np.fft.fft2(self.Nnbs)
-        RBackground_hat = np.fft.fft2(self.Rnbs)
-        V_Sn = np.fft.ifft2(Kn2 * NBackground_hat)
-        V_Sr = np.fft.ifft2(Kr2 * RBackground_hat)
-        self.Snoise = np.sqrt(V_Sn + V_Sr + Vr_ast + Vn_ast)
+        #GradNy, GradNx = np.gradient(np.fft.ifft2(B * Kn * N_hat))
+        #GradRy, GradRx = np.gradient(np.fft.ifft2(B ** 2 * Kr * R_hat))
 
-        self.Fs = np.real(np.sum(B ** 2 * abs(Pn_hat) * abs(Pr_hat)) / Den)
-        print 'Done!'
+        #Vr_ast = xrms ** 2 * GradRx ** 2 + yrms ** 2 * GradRy ** 2
+        #Vn_ast = xrms ** 2 * GradNx ** 2 + yrms ** 2 * GradNy ** 2
+
+        #NBackground_hat = np.fft.fft2(self.Nnbs)
+        #RBackground_hat = np.fft.fft2(self.Rnbs)
+        #V_Sn = np.fft.ifft2(Kn2 * NBackground_hat)
+        #V_Sr = np.fft.ifft2(Kr2 * RBackground_hat)
+        #self.Snoise = np.sqrt(V_Sn + V_Sr + Vr_ast + Vn_ast)
+
+        #self.Fs = abs(np.sum(B ** 2 * abs(Pn_hat) ** 2 * abs(Pr_hat) ** 2) / Den)
+        #self.Flux = self.S / self.Fs
+        #self.Scorr = self.S / self.Snoise
+        
+        print '\nDone!'
 
     def SaveImageToWD(self):
-        Images = {'S.fits': self.S, 'Snoise.fits': self.Snoise, 'Scorr.fits': self.Scorr, 'D.fits': self.D, 'Fs.fits': self.Fs}
+        Images = {'S.fits': self.S, 'Snoise.fits': self.Snoise, 'Scorr.fits': self.Scorr, 'D.fits': self.D, 'Flux.fits': self.Flux, 'Pd.fits': self.Pd}
 
         for element in Images:
             hdu = fits.PrimaryHDU(np.real(Images[element]))
@@ -219,7 +242,8 @@ class OptimalSubtraction:
     def SaveImageToDB(self):
         hdu = fits.PrimaryHDU(np.real(self.D))
         hdu.header=fits.getheader(self.Nf)
-        hdu.writeto(np.real(self.Df), clobber = True)
+        hdu.header['PHOTNORM'] = self.normalize
+        hdu.writeto(self.Df, clobber = True)
 
     def RegisterImages(self):
         #NCoords = sextractor(self.Nf)[:2]
