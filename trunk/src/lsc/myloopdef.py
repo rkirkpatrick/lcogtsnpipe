@@ -31,6 +31,14 @@ except ImportError as e:
 except:
     print '### warning: problem connecting to the database'
 
+def difference_suffix(_temptel='', _optimal=False):
+    suffix = ".diff.fits"
+    if _optimal == True:
+        suffix = ".optimal" + suffix
+    if _temptel != '':
+        suffix = ".{}".format(_temptel) + suffix
+    return suffix
+
 def run_getmag(imglist, _output='', _interactive=False, _show=False, _bin=1e-10, magtype='mag', database='photlco'):
     import lsc
     import datetime

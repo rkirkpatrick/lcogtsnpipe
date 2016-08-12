@@ -514,20 +514,21 @@ if __name__ == "__main__":   # main program
                             startdate = '19990101'
                             enddate   = '20080101'
 
-                        suffix = '.{}.diff.fits'.format(_temptel).replace('..', '.')
+                        suffix = difference_suffix(_temptel, _optimal)
                         if _temptel.upper() in ['SDSS', 'PS1']:
                             if _telescope == 'kb':
                                 fake_temptel = 'sbig'
                             elif _telescope == 'fs':
                                 fake_temptel = 'spectral'
                             elif _telescope == 'fl':
-				fake_temptel = 'sinistro'
+                                fake_temptel = 'sinistro'
                         elif _temptel:
                             fake_temptel = _temptel
                         else:
                             fake_temptel = _telescope
 
-                        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', startdate, enddate, '*', fake_temptel, _obstype)
+                        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', startdate, enddate,
+                                                            '*', fake_temptel, _obstype)
                         if lista:
                             ll00 = {}
                             for jj in lista[0].keys():
@@ -535,7 +536,7 @@ if __name__ == "__main__":   # main program
                             for i in range(0, len(lista)):
                                 for jj in lista[0].keys():
                                     ll00[jj].append(lista[i][jj])
-                            inds = argsort(ll00['mjd'])  #  sort by mjd
+                            inds = argsort(ll00['mjd'])  # sort by mjd
                             for i in ll00.keys():
                                 ll00[i] = take(ll00[i], inds)
                             lltemp = lsc.myloopdef.filtralist(ll00, _filter, '', _name, _ra, _dec, '', 4, _groupid, '')
@@ -546,12 +547,14 @@ if __name__ == "__main__":   # main program
                         listtar = [k + v for k, v in zip(ll['filepath'], ll['filename'])]
                         listtemp = [k + v for k, v in zip(lltemp['filepath'], lltemp['filename'])]
 
-			lsc.myloopdef.run_diff(array(listtar), array(listtemp), _show, _redo, _normalize, _convolve, _bgo, _fixpix, _optimal, suffix)
+                        lsc.myloopdef.run_diff(array(listtar), array(listtemp), _show, _redo, _normalize, _convolve,
+                                               _bgo, _fixpix, _optimal, suffix)
 
-                    elif _stage == 'template':  #    merge images using lacos and swarp
+                    elif _stage == 'template':  # merge images using lacos and swarp
                         listfile = [k + v for k, v in zip(ll['filepath'], ll['filename'])]
-                        lsc.myloopdef.run_template(array(listfile), _show, _redo, _interactive, _ra, _dec, _psf, _mag, _clean, _subtract_mag_from_header)
+                        lsc.myloopdef.run_template(array(listfile), _show, _redo, _interactive, _ra, _dec, _psf, _mag,
+                                                   _clean, _subtract_mag_from_header)
                     else:
                         print _stage + ' not defined'
-                else:
+                    else:
                     print '\n### no data selected'

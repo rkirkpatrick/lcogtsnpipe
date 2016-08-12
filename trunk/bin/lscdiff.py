@@ -164,10 +164,7 @@ if __name__ == "__main__":
                         imgtemp_path = imglist2[0]
                         _dirtemp, imgtemp0 = os.path.split(imgtemp_path)
                         if _dirtemp: _dirtemp += '/'
-                        if _optimal:
-                            imgout0 = re.sub('.fits', '.optimal.diff.fits', imgtarg0)
-                        else:
-                            imgout0 = re.sub('.fits', option.suffix, imgtarg0)
+                        imgout0 = re.sub('.fits', option.suffix, imgtarg0)
                         if os.path.isfile(_dir + imgout0) and not _force:
                             print 'file', imgout0, 'already there'
                             continue
