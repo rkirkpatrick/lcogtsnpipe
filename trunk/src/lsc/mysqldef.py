@@ -31,24 +31,19 @@ def getconnection(site):
 ########################################################################
 def queryfilenamelike(query,likelist=[],datatable=''):
 #Adds onto query a search for entries in the likelist to be within the filename.
-   if datatable:
-      datatable += "."
-   if likelist != []:
-      if len(likelist) == 1:
-         query += ' AND {0}filename like "%{1}%" '.format(datatable,likelist[0])
-      else:
-         for i in range(len(likelist)):
-            if i == 0:
-               query += ' AND ( {0}filename LIKE "%{1}%" '.format(datatable,likelist[i])
-            else:
-               query += ' OR {0}filename LIKE "%{1}%" '.format(datatable,likelist[i])
-         query += ")"
-   return query
+    if datatable != '':
+        datatable += "."
+    if len(likelist) > 0:
+        query += ' AND ( {0}filename LIKE "%{1}%" '.format(datatable, likelist[0])
+        for i in range(1, len(likelist)):
+            query += ' OR {0}filename LIKE "%{1}%" '.format(datatable,likelist[i])
+        query += ")"
+    return query
 
 
 def querytelescope(query,telescope='all',datatable=''):
    import lsc
-   if datatable:
+   if datatable != '':
       datatable += "."
    if telescope in lsc.util.site0+['1m0','fl','kb','2m0','fs','spectral','sbig','sinistro']:
       #['elp','lsc','cpt','coj','1m0','kb','fl','ogg']:
@@ -1179,7 +1174,7 @@ def getlike(conn, table, column, value,column2='*'):
    return resultSet
 
 ##################################################################
-def sqlquery(conn,query):
+def sqlquery(conn, query):
     import MySQLdb,os
     try:
         cursor = conn.cursor(MySQLdb.cursors.DictCursor)
