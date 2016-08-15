@@ -514,7 +514,7 @@ if __name__ == "__main__":   # main program
                             startdate = '19990101'
                             enddate   = '20080101'
 
-                        suffix = difference_suffix(_temptel, _optimal)
+                        suffix = lsc.myloopdef.difference_suffix(_temptel, _optimal)
                         if _temptel.upper() in ['SDSS', 'PS1']:
                             if _telescope == 'kb':
                                 fake_temptel = 'sbig'
