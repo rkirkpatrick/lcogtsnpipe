@@ -181,10 +181,10 @@ if __name__ == "__main__":
             query  = '''SELECT filename, filepath, dayobs ,psf '''
             query += '''FROM photlco '''
             query += '''WHERE targetid=%s ''' %targetid
+            query += '''AND filename not like '%e93%' '''
             query += '''AND instrument like '%fl%' '''
             query += '''AND filetype = 4 '''
             query += '''AND dayobs != '%s' ''' %dayobs
-            query += '''AND filename LIKE '%e91%' '''
             query += '''ORDER BY dateobs, ut LIMIT 1 '''
             fileinfo = lsc.mysqldef.sqlquery(db,query)
             templatedate =''
@@ -199,7 +199,7 @@ if __name__ == "__main__":
                 # does the template have a good PSF?
                 if fileinfo[fileindex]['psf'] == 'X':
                     print ''' Making PSF for the template:'''
-                    command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf' + tempfwhm + show
+                    command = 'lscloop.py -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf' + tempfwhm + show
                     print command
                     os.system(command)
             else:
@@ -207,11 +207,11 @@ if __name__ == "__main__":
                 query  = '''SELECT filename, filepath, dayobs, psf '''
                 query += '''FROM photlco '''
                 query += '''WHERE targetid=%s ''' %targetid
+                query += '''AND filename not like '%e93%' '''
                 query += '''AND instrument like '%fl%' '''
                 query += '''AND filetype = 1 '''
                 query += '''AND dayobs != %s ''' %dayobs
                 query += '''AND wcs = 0 '''
-                query += '''AND filename LIKE '%e91%' '''
                 query += '''ORDER BY dayobs, ut LIMIT 2 '''
                 fileinfo = lsc.mysqldef.sqlquery(db,query)
                 print fileinfo
@@ -224,14 +224,14 @@ if __name__ == "__main__":
                     templatedate = fileinfo[fileindex]['dayobs']
                     if fileinfo[fileindex]['psf'] == 'X' or _redo == True:
                         print ''' Making a psf for found image'''
-                        command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' -s psf ' + tempfwhm + show
+                        command = 'lscloop.py --obstype e91 e90 -n ' + objname + ' -e ' + templatedate + ' -s psf ' + tempfwhm + show
                         os.system(command)
                         print ''' Converting image to template:'''
-                    command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' -s template'
+                    command = 'lscloop.py --obstype e91 e90 -n ' + objname + ' -e ' + templatedate + ' -s template'
                     print command
                     os.system(command)
                     print ''' Making PSF for the template:'''
-                    command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf ' + tempfwhm + show
+                    command = 'lscloop.py --obstype e91 e90 -n ' + objname + ' -e ' + templatedate + ' --filetype=4 -s psf ' + tempfwhm + show
                     print command
                     os.system(command)
                 else:
@@ -239,7 +239,7 @@ if __name__ == "__main__":
 
             if templatedate != '':
                 print ''' Performing cosmic-ray rejection on template:'''
-                command = 'lscloop.py --obstype e91 -n ' + objname + ' -e ' + templatedate + ' -s cosmic --filetype 4'
+                command = 'lscloop.py --obstype e91 e90 -n ' + objname + ' -e ' + templatedate + ' -s cosmic --filetype 4'
                 print command
                 os.system(command)
 
@@ -264,7 +264,7 @@ if __name__ == "__main__":
 
                 # run image subtraction
                 print ''' Running image subtraction:'''
-                command = 'lscloop.py --obstype e93.fits e91 -n ' + objname + ' -e ' + dayobs + ' --tempdate ' + templatedate + ' -s diff --normalize t -T ' + instrument[0:2] + optimal
+                command = 'lscloop.py --obstype e93.fits e91 e90 -n ' + objname + ' -e ' + dayobs + ' --tempdate ' + templatedate + ' -s diff --normalize t -T ' + instrument[0:2] + optimal
                 print command
                 os.system(command)
 
