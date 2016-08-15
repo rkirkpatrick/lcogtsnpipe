@@ -247,6 +247,7 @@ if __name__ == "__main__":
 
         zeropoint = findzeropoint(rcomb["photlco.z1"],rcomb["photlco.z2"],rcomb["photlco.zcol1"],
                                   rcomb["photlco.zcol2"])
+        print zeropoint
         airmass = rcomb["photlco.airmass"]
 
         preexistrow =  lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
