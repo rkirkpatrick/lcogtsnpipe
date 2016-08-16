@@ -30,12 +30,16 @@ from LCOGTingest import db_ingest
 ##############################################################################
 #############################Ingest Functions#################################
 ##############################################################################
-def choosemagnitude():
-    if np.random.randint(2) == 0:
-        return None
+def choosemagnitude(_magnitde=None):
+    if _magnitude == None:
+        if np.random.randint(2) == 0:
+            mag = None
+        else:
+            mag = np.random.uniform(14,20)
     else:
-        i = np.random.uniform(15,20)
-        return i
+        mag = _magnitude
+
+    return mag
 
 def comparefakesourcemagnitude(ofilep, magnitude):
     hdulist1 = pyfits.open(ofilep)
@@ -218,10 +222,7 @@ if __name__ == "__main__":
         ofile = ifile.replace('e91','e93')
         if _move == True:
             ofile = ofile.replace('.fits','.moved.fits')
-        if _magnitude == None:
-            magnitude = choosemagnitude()
-        else:
-            magnitude = _magnitude
+        magnitude = choosemagnitude(_magnitude)
 
         query_join = 'SELECT * FROM photlco LEFT JOIN photlcoraw ON ' \
                      'photlco.filename = photlcoraw.filename WHERE ' \
