@@ -83,7 +83,7 @@ def print_and_run_command(command):
     os.system(command)
 
 
-def perform_lscloop(command, stage="psf", fwhm='', show='',instrument='fl', optimal='',tempdate='', _temptel='' ):
+def perform_lscloop(command, stage="psf", fwhm='', show='',instrument='fl', optimal='',tempdate='', _temptel='fl' ):
     #performs lscloop stages wcs, psf, psfmag, zcat, and mag
     if stage == 'wcs':
         command += ' -s wcs '
@@ -104,10 +104,7 @@ def perform_lscloop(command, stage="psf", fwhm='', show='',instrument='fl', opti
             argument_tempdate = ' --tempdate ' + tempdate
         else:
             argument_tempdate = ''
-        if _temptel != '':
-            argument_temptel = ' --temptel ' + _temptel[0:2]
-        else:
-            argument_temptel = ''
+        argument_temptel = ' --temptel ' + _temptel
 
         command += ' -s diff --normalize t -T ' + instrument[0:2] + optimal + argument_tempdate + argument_temptel
 
@@ -122,7 +119,7 @@ def do_photometry(dayobs, objname, obstype=[], filetype=1, fwhm='', show=''):
     perform_lscloop(loop_command, stage="mag")
 
 
-def query_for_previous_templates(db, row, _tempdate='',_temptel=''):
+def query_for_previous_templates(db, row, _tempdate='',_temptel='fl'):
     query = '''SELECT * FROM photlco '''
     query += '''WHERE targetid=%s ''' % row['targetid']
     query += '''AND filetype = 4 '''
@@ -138,7 +135,7 @@ def query_for_previous_templates(db, row, _tempdate='',_temptel=''):
     return fileinfo
 
 
-def query_for_possible_templates(db, row, _tempdate='',_temptel=''):
+def query_for_possible_templates(db, row, _tempdate='',_temptel='fl'):
     # is there an LCOGT image that could be used as a template?
     query = '''SELECT * FROM photlco '''
     query += '''WHERE targetid=%s ''' % row['targetid']
@@ -166,23 +163,23 @@ def items_from_temp(templates):
 
 def make_template_psf(templates, tempfwhm, show):
     tempdate, tempname, temppsf, objname = items_from_temp(templates)
-    if "temp" not in tempname:
-        tempname = tempname.replace('.fits','.temp.fits')
+    # if "temp" not in tempname:
+    #     tempname = tempname.replace('.fits','.temp.fits')
     template_psf_command = create_loop_command(tempdate, objname, obstype=[tempname], filetype=4)
     print '''Making PSF for the template:'''
     perform_lscloop(template_psf_command, stage='psf', fwhm=tempfwhm, show=show)
     
 
-def find_and_make_template(db, row, _redo=False, _tempdate='', _temptel='', tempfwhm='', show=''):
+def find_and_make_template(db, row, _redo=False, _tempdate='', _temptel='fl', tempfwhm='', show=''):
 
     previous_templates = query_for_previous_templates(db, row, _tempdate=_tempdate, _temptel=_temptel)
     # if LCOGT template exists and you don't want to redo the psfs:
-    if len(previous_templates) > 0 and _redo == False:
+    if len(previous_templates) > 0:
         tempdate, tempname, temppsf, objname = items_from_temp(previous_templates)
         print '''Found LCOGT template from %s.''' % tempdate
         
         # does the template have a good PSF?
-        if temppsf == 'X':
+        if temppsf == 'X' or _redo == True:
             make_template_psf(previous_templates, tempfwhm, show)
 
     # If old templates don't exist or you want to redo data
@@ -282,7 +279,7 @@ if __name__ == "__main__":
                         help="Set the fwhm in the template PSFs", type=float)
     parser.add_argument("--tempdate", dest="tempdate", default='', type=str,
                         help='--tempdate  template date \t [%(default)s]')
-    parser.add_argument("--temptel", dest="temptel", default='', type=str,
+    parser.add_argument("--temptel", dest="temptel", default='fl', type=str,
                     help='--temptel  template instrument \t [%(default)s]')
     parser.add_argument('-o','--optimal', dest="optimal", default=False,
                         action="store_true", help="Use optimal image differencing")
@@ -385,7 +382,7 @@ if __name__ == "__main__":
             # If a template exists
             if tempdate != '':
                 print '''Performing cosmic-ray rejection on template:'''
-                template_cosmic_command = create_loop_command(tempdate, objname,filetype=4)
+                template_cosmic_command = create_loop_command(tempdate, objname, filetype=4)
                 perform_lscloop(template_cosmic_command, stage='cosmic')
 
                 # Reduce the data for each magnitude
@@ -395,7 +392,7 @@ if __name__ == "__main__":
                     reduce_fake_source_image(dayobs, objname, inmag, fakeimgobs, fwhm, show)
 
                     # Run image subtraction
-                    print '''Running difference imagint on fake image'''
+                    print '''Running difference imaging on fake image'''
                     diff_command = create_loop_command(dayobs, objname, obstype=diffobs)
                     perform_lscloop(diff_command, stage='diff', instrument=instrument, optimal=optimal, tempdate=tempdate, _temptel=_temptel)
 
@@ -406,10 +403,10 @@ if __name__ == "__main__":
 
                     try:
                         if _redo == False:
-                            diffmag = get_new_diffmag(db, diffname)
+                            diffmag = get_new_diffmag(db, diffname)# This diffname is edited from photlco
                             print diffmag
                             preexistrow = query_for_preexisting_row(db, diffname, inmag)
-
+                            print preexistrow
                             if len(preexistrow) > 0:
                                 # update db with new data
                                 print ("Data exists for magnitude of " + str(inmag) + ", so magcomparsion will be updated")
@@ -422,8 +419,7 @@ if __name__ == "__main__":
                         if _redo == True:
                             diffname = row['filename'] # this row is from magcomparison
                             diffmag = get_new_diffmag(db, diffname)
-                            print diffmag
-                            print "Database is being updated with redone photometry"
+                            print "Database is being updated with redone photometry and a diffmag of", diffmag
                             update_magcomparison(diffmag, row['id'])
 
                     except:
@@ -441,8 +437,8 @@ if __name__ == "__main__":
     os.system('rm -f tmpcoo')
 
 
-    #CREATE TABLE magcomparison( id bigint(20) UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
-        #  targetid bigint(20) NOT NULL, instrument text DEFAULT NULL, filepath text DEFAULT NULL,
-        #  filename varchar(100) DEFAULT NULL, dayobs text DEFAULT NULL,
-        #  objname text DEFAULT NULL, inmag double DEFAULT 9999,
-        #  diffmag double DEFAULT 9999, outlier boolean DEFAULT false);
+    # CREATE TABLE magcomparison( id bigint(20) UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
+    #      targetid bigint(20) NOT NULL, instrument text DEFAULT NULL, filepath text DEFAULT NULL,
+    #      filename varchar(100) DEFAULT NULL, dayobs text DEFAULT NULL,
+    #      objname text DEFAULT NULL, inmag double DEFAULT 9999,
+    #      diffmag double DEFAULT 9999, outlier boolean DEFAULT false);
