@@ -12,7 +12,53 @@ description = "Displays a plot of the data of fake sources within magcomparison"
 usage = "%(prog)s [-e epoch -g graph -n objname -m magnitude]"
 version = "0.1"
 
+def create_magcomparison_query(args):
+    query = "SELECT * from magcomparison "
+    if str(args.epoch) == '':
+        query += ' WHERE id > 1 '
+    elif '-' not in str(args.epoch):
+        query += ' WHERE dayobs = {0} '.format(args.epoch)
+    else:
+        epoch1, epoch2 = args.epoch.split('-')
+        query += ' WHERE dayobs >= {0} AND dayobs <= {1} '.format(epoch1,epoch2)
+
+    if args.name != '':
+        query += ' AND objname = "{0}" '.format(args.name)
+
+    if args.bad is False:
+        query += ' AND diffmag != 9999 '
+
+    query = lsc.mysqldef.queryfilenamelike(query, args.obstype)
+
+    if args.magnitude != []:
+        query += ' AND ( inmag = {0} '.format(args.magnitude[0])
+        if len(args.magnitude) > 1:
+            for i in range(1, len(args.magnitude)):
+                query += ' OR inmag = {0} '.format(args.magnitude[i])
+        query += ") "
+
+    return query
+
+
+def produce_result_set(args, _keepout=True):
+    # Connect to database, and query the db
+    try:
+        hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
+        db = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
+    except:
+        print 'Error: Could not connect to database'
+
+    query = create_magcomparison_query(args)
+    if _keepout is False:
+        query += "AND outlier = FALSE"
+
+    resultSet = lsc.mysqldef.sqlquery(db,query)
+
+    return resultSet
+
+
 def updateoutliers(resultSet,_magnitude):
+    print "#" * 75
     # Group rows into lists based on inmag
     maggroup= []
     for inmag in _magnitude:
@@ -22,7 +68,6 @@ def updateoutliers(resultSet,_magnitude):
         for i, inmag in enumerate(_magnitude):
             if row['inmag'] == inmag:
                 maggroup[i].append(row)
-
 
     for i, inmagrow in enumerate(maggroup):
         try:
@@ -49,6 +94,34 @@ def updateoutliers(resultSet,_magnitude):
             print "No data for magnitude:", _magnitude[i]
 
     print "Outliers have been updated", '\n', '#' * 75
+
+
+def make_xy_sets(resultSet):
+    x = []
+    y = []
+    for row in resultSet:
+        x.append(row['inmag'])
+        y.append(row['diffmag'])
+    xset = np.array(x)
+    yset = np.array(y)
+
+    return xset, yset
+
+
+def create_datasets_for_inmag(_magnitude, xset, yset):
+    # Create list of numpy arrays. Each numpy array should have all data for some inmag, sorted ascending
+    dataset = []
+    for magindex, inmag in enumerate(_magnitude):
+        dataset.append([])
+        for xindex, x in enumerate(xset):
+            if x == inmag:
+                dataset[magindex].append(yset[xindex])
+
+    for i in range(len(_magnitude)):
+        dataset[i] = np.array(dataset[i])
+
+    return dataset
+
 
 def len2shape(pltlength):
     # find different shapes that would work
@@ -85,6 +158,25 @@ def shape2rc(shape):
     row = int(shape[0])
     col = int(shape[1])
     return row, col
+
+
+def make_boxplot_or_histogram(_graph, ax, data, mag, mean, stddev, _bestfit=False):
+    xlabel = "Input Mag: " + str(mag)
+    ax.set_xlabel(xlabel)
+
+    if _graph == "boxplot":
+        ax.boxplot(dataset[ii])
+        ax.yaxis.grid(True)
+        ax.set_ylabel("Difference Mag")
+
+    elif _graph == "histogram":
+        n, bins, patches = ax.hist(data, bins=20)
+        ax.set_ylabel("Number of data points in bin")
+
+        if _bestfit == True:
+            # [WIP]
+            y = mlab.normpdf(bins, mean, stddev)
+            ax.plot(bins, y, 'r--')
 
 
 def varstats(_magnitude, dataset):
@@ -132,95 +224,42 @@ if __name__ == "__main__":
     _updateout = args.updateout
     _obstype = args.obstype
 
-    # Set query based on arguments
-    query = "SELECT * from magcomparison "
-    if str(_epoch) == '':
-        query += ' WHERE id > 1 '
-    elif '-' not in str(_epoch):
-        query += ' WHERE dayobs = {0} '.format(_epoch)
-    else:
-        epoch1, epoch2 = _epoch.split('-')
-        query += ' WHERE dayobs >= {0} AND dayobs <= {1} '.format(epoch1,epoch2)
+    resultSet = produce_result_set(args)
 
-    if _name != '':
-        query += ' AND objname = "{0}" '.format(_name)
-
-    if _bad is False:
-        query += ' AND diffmag != 9999 '
-
-    query = lsc.mysqldef.queryfilenamelike(query, _obstype)
-
-    if _magnitude != []:
-        if len(_magnitude) == 1:
-            query += ' AND inmag = {0} '.format(_magnitude[0])
-        else:
-            for i in range(len(_magnitude)):
-                if i == 0:
-                    query += ' AND ( inmag = {0} '.format(_magnitude[i])
-                else:
-                    query += ' OR inmag = {0} '.format(_magnitude[i])
-            query += ") "
-    elif _magnitude == []:
+    if _magnitude == []:
         _magnitude = np.arange(14, 20.5, 0.5)
     _magnitude.sort()
 
-    print "#" * 75
+    if _updateout is True:
+        updateoutliers(resultSet, _magnitude)
 
-    # Connect to database, and query the db
-    try:
-        hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
-        db = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
-    except:
-        print 'Error: Could not connect to database'
-
-    resultSet = lsc.mysqldef.sqlquery(db,query)
     if _keepout is False:
-        if _updateout is True:
-            updateoutliers(resultSet,_magnitude)
-        query += " AND outlier = FALSE"
-        resultSet = lsc.mysqldef.sqlquery(db,query)
-
+        del resultSet
+        resultSet = produce_result_set(args, _keepout=_keepout)
 
     # Set x(inmag) data and y(diffmag) data as ndarrays
-    x = []
-    y = []
-    for row in resultSet:
-        x.append(row['inmag'])
-        y.append(row['diffmag'])
-    x = np.array(x)
-    y = np.array(y)
-
-    # Create datasets for each inmag
-    dataset = []
-    for inmag in _magnitude:
-        dataset.append([])
-    for xi in range(len(x)):
-        for magnumber, inmag in enumerate(_magnitude):
-            if x[xi] == inmag:
-                dataset[magnumber].append(y[xi])
-
-    for i in range(len(_magnitude)):
-        dataset[i] = np.array(dataset[i])
+    xset, yset = make_xy_sets(resultSet)
+    dataset = create_datasets_for_inmag(_magnitude, xset, yset)
 
     # If user wants a scatterplot
     if _graph == "scatter":
-        plt.scatter(x,y)
+        plt.scatter(xset,yset)
         # Create bestfit line in scatterplot
         if _bestfit == True:
-            a = np.polyfit(x,y,1)
-            plt.plot(x,a[0]*x+a[1],color="red",label="Best Fit")
+            a = np.polyfit(xset,yset,1)
+            plt.plot(xset,a[0]*x+a[1],color="red",label="Best Fit")
             print "Best fit line data:"
             print "Slope =", str(a[0]) + ",", "y-int =", a[1]
 
         # Create y = x line in scatterplot
         if _yx == True:
-            plt.plot(x,x,color="purple", label="y = x")
+            plt.plot(xset,xset,color="purple", label="y = x")
         # Create legend
         if _bestfit or _yx:
             plt.legend(loc="upper left")
 
-    # If user wants a histogram
-    elif _graph == "histogram":
+    # If user wants a boxplot or histogram
+    elif _graph in ['boxplot','histogram']:
         shape = len2shape(len(_magnitude))
         row, col = shape2rc(shape)
         fig, axes = plt.subplots(nrows=row, ncols=col, figsize=(12, 7))
@@ -238,43 +277,8 @@ if __name__ == "__main__":
                 axis = axes[i]
             for ax in axis:
                 if ii < len(_magnitude):
-                    n, bins, patches = ax.hist(dataset[ii], bins=20)
-                    xlabel = "Input Mag: " + str(_magnitude[ii])
-                    ax.set_xlabel(xlabel)
-                    ax.set_ylabel("Number of data points in bin")
-
-                    if _bestfit == True:
-                        #[WIP]
-                        y = mlab.normpdf(bins, means[ii], stddevs[ii])
-                        ax.plot(bins, y, 'r--')
+                    make_boxplot_or_histogram(_graph, ax, dataset[ii], _magnitude[ii], means[ii], stddevs[ii], _bestfit)
                     ii += 1
-
-
-
-    # If user wants a boxplot
-    elif _graph == "boxplot":
-        shape = len2shape(len(_magnitude))
-        row, col = shape2rc(shape)
-        fig, axes = plt.subplots(nrows=row, ncols=col, figsize=(12, 7))
-        fig.tight_layout()
-
-        ii = 0
-        for i in range(row):
-            if row == 1:
-                axis = axes
-                if col == 1:
-                    axis = [axis]
-            else:
-                axis = axes[i]
-            for ax in axis:
-                if ii < len(_magnitude):
-                    ax.boxplot(dataset[ii])
-                    ax.yaxis.grid(True)
-                    ax.set_ylabel("Difference Mag")
-                    xlabel = "Input Mag: " + str(_magnitude[ii])
-                    ax.set_xlabel(xlabel)
-                    ii += 1
-
 
     # If user wants variable statistics for each inmag
     elif _graph == "varstats":
@@ -282,7 +286,6 @@ if __name__ == "__main__":
         for i in range(len(_magnitude)):
             print "For an input magnitude of", _magnitude[i]
             print "Mean =", means[i], "and Standard Deviation =", stddevs[i], '\n'
-
 
     else:
         sys.argv.append('--help')
