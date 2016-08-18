@@ -37,7 +37,7 @@ def query_for_files(conn, args):
         epoch1, epoch2 = args.epoch.split('-')
         query += ' AND p.dayobs >= {0} AND p.dayobs <= {1} '.format(epoch1, epoch2)
     
-    if args.filename != []:
+    if args.filestr != []:
         query = lsc.mysqldef.querylike(query, likelist=args.filestr, column='filename', datatable='p')
     
     if args.name != '':
@@ -191,7 +191,7 @@ def ingest_into_photlco(row):
     epoch = ' -e ' + str(row['dayobs'])
 
     print '\n', ('#' * 75)
-    command = 'lscingestredudata.py --obstype e93 -m ' + epoch + name
+    command = 'lscingestredudata.py --filestr e93 -m ' + epoch + name
     print_and_run_command(command)
 
 
