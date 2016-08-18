@@ -41,8 +41,8 @@ if __name__ == "__main__":
                       help='z1 \t [%(default)s]')
     parser.add_argument("--z2", dest="z2", default=None, type=int,
                       help='z2 \t [%(default)s]')
-    parser.add_argument("--obstype",nargs="+",type=str,dest="obstype", default=[], help = '--obstype\
-                       [e90,e91,e92]\t [%(default)s]\n')
+    parser.add_argument("--filestr", nargs="+", type=str, dest="filestr", default=[],
+                        help='Enter part(s) of the filename you want to search for')
     parser.add_argument("--temptel", dest="temptel", default='', type=str,
                         help='--temptel  template instrument \t [%default]')
 
@@ -61,7 +61,7 @@ if __name__ == "__main__":
     _z1 = args.z1
     _z2 = args.z2
     _filetype = args.filetype
-    _obstype = args.obstype
+    _filestr = args.filestr
     _temptel = args.temptel
 
     if args.force == None:
@@ -88,7 +88,7 @@ if __name__ == "__main__":
     epoch = args.epoch
     if '-' not in str(epoch):
         # epoch0 = datetime.date(int(epoch[0:4]), int(epoch[4:6]), int(epoch[6:8]))
-        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', epoch, '', '*', _telescope,_obstype)
+        lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', epoch, '', '*', _telescope,_filestr)
         # lista=getfromdataraw(lsc.src.myloopdef.conn, 'photlco', 'dateobs',str(epoch0), 'all')
     else:
         epoch1, epoch2 = string.split(epoch, '-')
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         listepoch = [re.sub('-', '', str(i)) for i in
                      [start + datetime.timedelta(days=x) for x in range(0, 1 + (stop - start).days)]]
         lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(listepoch[0]),
-                                            str(listepoch[-1]), '*', _telescope,_obstype)
+                                            str(listepoch[-1]), '*', _telescope,_filestr)
 
     if lista:
         ll0 = {}

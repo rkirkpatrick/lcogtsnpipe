@@ -126,10 +126,8 @@ if __name__ == "__main__":   # main program
     parser.add_argument("--subtract-mag-from-header", action='store_true', help='automatically subtract mag from header of template image \t\t [%(default)s]')
     parser.add_argument("--fixpix", dest="fixpix", action="store_true", default=False,
                       help='Run fixpix on the images before doing image subtraction')
-
-    parser.add_argument("--obstype",nargs="+",type=str,dest="obstype", default=[], help = '--obstype\
-                       [e90,e91,e92]\t [%(default)s]\n')
-
+    parser.add_argument("--filestr",nargs="+",type=str,dest="filestr", default=[],
+                        help='Enter part(s) of the filename you want to search for')
     parser.add_argument("--optimal", dest="optimal", action="store_true", default=False, 
                       help='Use Zackey optimal image subtraction \t [%(default)s]')
 
@@ -222,7 +220,7 @@ if __name__ == "__main__":   # main program
     _clean = args.clean
     _subtract_mag_from_header = args.subtract_mag_from_header
     _psf = args.psf
-    _obstype = args.obstype
+    _filestr = args.filestr
     _optimal = args.optimal
 
     if _xwindow:
@@ -277,9 +275,9 @@ if __name__ == "__main__":   # main program
 
     if not _stage or _stage in ['local', 'getmag', 'wcs', 'psf', 'psfmag', 'makestamp', 'cosmic', 'apmag','ingestsloan', 'ingestps1']:
         if len(listepoch) == 1:
-            lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(listepoch[0]), '', '*', _telescope, _obstype)
+            lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(listepoch[0]), '', '*', _telescope, _filestr)
         else:
-            lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(listepoch[0]), str(listepoch[-1]), '*', _telescope, _obstype)
+            lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(listepoch[0]), str(listepoch[-1]), '*', _telescope, _filestr)
         if lista:
             ll0 = {}
             for jj in lista[0].keys():
@@ -344,7 +342,7 @@ if __name__ == "__main__":   # main program
     else:
         for epo in listepoch:
             print '\n#### ' + str(epo)
-            lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(epo), '', '*', _telescope, _obstype)
+            lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', str(epo), '', '*', _telescope, _filestr)
             if lista:
                 ll0 = {}
                 for jj in lista[0].keys():
@@ -528,7 +526,7 @@ if __name__ == "__main__":   # main program
                             fake_temptel = _telescope
 
                         lista = lsc.mysqldef.getlistfromraw(lsc.myloopdef.conn, 'photlco', 'dayobs', startdate, enddate,
-                                                            '*', fake_temptel, _obstype)
+                                                            '*', fake_temptel, _filestr)
                         if lista:
                             ll00 = {}
                             for jj in lista[0].keys():
