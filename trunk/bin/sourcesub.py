@@ -355,7 +355,7 @@ if __name__ == "__main__":
                 mags_to_be_done = choose_not_done_mags(db, diffname, _magnitude)
         else:
             diffname = filename
-            mags_to_be_done = row['inmag']
+            mags_to_be_done = [row['inmag']]
 
         # If magnitudes have not been done yet for the image
         if len(mags_to_be_done) > 0:
