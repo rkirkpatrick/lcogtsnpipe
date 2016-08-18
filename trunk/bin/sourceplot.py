@@ -247,7 +247,7 @@ if __name__ == "__main__":
         # Create bestfit line in scatterplot
         if _bestfit == True:
             a = np.polyfit(xset,yset,1)
-            plt.plot(xset,a[0]*x+a[1],color="red",label="Best Fit")
+            plt.plot(xset,a[0]*xset+a[1],color="red",label="Best Fit")
             print "Best fit line data:"
             print "Slope =", str(a[0]) + ",", "y-int =", a[1]
 
