@@ -131,7 +131,8 @@ if __name__ == "__main__":
                       help='filetype  1 [single], 2 [merge], 3 differences \t [%(default)s]')
     parser.add_argument("-X", "--xwindow", action="store_true",
                       dest='xwindow', default=False, help='xwindow \t\t\t [%(default)s]')
-    parser.add_argument("--obstype", nargs="+", type=str, dest="obstype", default=[])
+    parser.add_argument("--filestr", nargs="+", type=str, dest="filestr", default=[],
+                        help='Enter part(s) of the filename you want to search for')
 
 
     args = parser.parse_args()
@@ -142,15 +143,15 @@ if __name__ == "__main__":
     _filetype = args.filetype
     _filter = args.filter
     _xwindow = args.xwindow
-    _obstype = args.obstype
+    _filestr = args.filestr
 
-    if _obstype != []:
+    if _filestr != []:
         stringpass = ''
-        for option in _obstype:
+        for option in _filestr:
             stringpass += option + ' '
-        obstype = " --obstype " + stringpass
+        filestr = " --filestr " + stringpass
     else:
-        obstype = ''
+        filestr = ''
 
     if _xwindow:
         from stsci.tools import capable
@@ -212,15 +213,15 @@ if __name__ == "__main__":
         tt = '  -T ' + _telescope + ' '
     print '\n####  compute  astrometry, when missing '
     #  compute astrometry when tim astrometry failed
-    os.system('lscloop.py -e ' + epoch + ' -b wcs -s wcs --mode astrometry ' + obstype + ff + tt + XX)
+    os.system('lscloop.py -e ' + epoch + ' -b wcs -s wcs --mode astrometry ' + filestr + ff + tt + XX)
     #  try again or set to bad image
-    os.system('lscloop.py -e ' + epoch + ' -b wcs -s wcs --xshift 1 --yshift 1 ' + obstype + ff + tt + XX )
+    os.system('lscloop.py -e ' + epoch + ' -b wcs -s wcs --xshift 1 --yshift 1 ' + filestr + ff + tt + XX )
 
     print '\n####  compute  psf, when missing, with catalog'
-    os.system('lscloop.py -e ' + epoch + ' -b psf -s psf ' + obstype + ff + tt + XX)  #  compute psf
+    os.system('lscloop.py -e ' + epoch + ' -b psf -s psf ' + filestr + ff + tt + XX)  #  compute psf
 
     print '\n####  compute  psf, when missing, with sextractor'
-    os.system('lscloop.py -e ' + epoch + ' -b psf -s psf --use-sextractor ' + obstype + ff + tt + XX)  #  compute psf
+    os.system('lscloop.py -e ' + epoch + ' -b psf -s psf --use-sextractor ' + filestr + ff + tt + XX)  #  compute psf
 #    print '\n####  compute  psf, when missing with fix fwhm'
 #    os.system('lscloop.py -e ' + epoch + ' -b psf -s psf --fwhm 6 ' + ff + tt + XX)  #  compute psf
 
@@ -228,7 +229,7 @@ if __name__ == "__main__":
     import glob
 
 #    ll = lsc.myloopdef.get_list(epoch, 'all', '', '', '', '', '', '', 'photlco', _filetype)
-    ll = lsc.myloopdef.get_list(epoch, _telescope, '', '', '', '', '', '', 'photlco', _filetype, _obstype)
+    ll = lsc.myloopdef.get_list(epoch, _telescope, '', '', '', '', '', '', 'photlco', _filetype, _filestr)
     lista = list(set(ll['objname']))
     sloancal = []
     landoltcal = []
@@ -337,10 +338,10 @@ if __name__ == "__main__":
                     if _telescope == 'all':
                         for _tel in ['elp', 'lsc', 'cpt']:
                             os.system('lscloop.py --type ph  -F -e ' + epoch + ' -n ' + obj + ' -f ' + field + \
-                                          ' -b abscat -s abscat --standard ' + _std + ' -T ' + _tel + XX + obstype)
+                                          ' -b abscat -s abscat --standard ' + _std + ' -T ' + _tel + XX + filestr)
                     else:
                             os.system('lscloop.py --type ph  -F -e ' + epoch + ' -n ' + obj + ' -f ' + field + \
-                                          ' -b abscat -s abscat --standard ' + _std + ' -T ' + _telescope + XX + obstype )
+                                          ' -b abscat -s abscat --standard ' + _std + ' -T ' + _telescope + XX + filestr )
             if field == 'sloan':
                 #               if obj not in sloancal:
                 print obj + ': object not calibrated in sloan'
@@ -348,10 +349,10 @@ if __name__ == "__main__":
                     if _telescope == 'all':
                         for _tel in ['elp', 'lsc', 'cpt']:
                             os.system('lscloop.py --type ph  -F -e ' + epoch + ' -n ' + obj + ' -f ' + field + \
-                                          ' -b abscat -s abscat --standard ' + _std + ' -T ' + _tel + XX + obstype)
+                                          ' -b abscat -s abscat --standard ' + _std + ' -T ' + _tel + XX + filestr)
                     else:
                         os.system('lscloop.py --type ph  -F -e ' + epoch + ' -n ' + obj + ' -f ' + field + \
-                                      ' -b abscat -s abscat --standard ' + _std + ' -T ' + _telescope + XX + obstype)
+                                      ' -b abscat -s abscat --standard ' + _std + ' -T ' + _telescope + XX + filestr)
     # run psffit on all objects
     for field in fil:
         for obj in lista:
@@ -359,10 +360,10 @@ if __name__ == "__main__":
                 print '###', obj
                 if obj in coomandsn.keys():
                     os.system('lscloop.py -b psfmag -n ' + obj + ' -e ' + epoch + ' -f ' + field + ' ' + XX + \
-                              ' -s psfmag -c  ' + coomandsn[obj] + obstype)
+                              ' -s psfmag -c  ' + coomandsn[obj] + filestr)
                 else:
                     os.system('lscloop.py -b psfmag -n ' + obj + ' -e ' + epoch + ' -f ' + field + ' ' + XX + \
-                              ' -s psfmag -c  -x 3 -y 3 --bkg 4 --size 7 ' + obstype)
+                              ' -s psfmag -c  -x 3 -y 3 --bkg 4 --size 7 ' + filestr)
 
     print '\n### landolt fields:\n' + str(landoltcal)
     print '\n### sloan field:\n' + str(sloancal)
@@ -375,14 +376,14 @@ if __name__ == "__main__":
                         print '###', obj
                         try:
                             os.system('lscloop.py -b mag -n ' + obj + ' -e ' + epoch + ' -f ' + field + ' ' + XX + \
-                                      ' -s mag --type fit' + obstype)
+                                      ' -s mag --type fit' + filestr)
                         except:
                             pass
                     elif obj in apasscal:
                         print '###', obj
                         try:
                             os.system('lscloop.py -b mag -n ' + obj + ' -e ' + epoch + ' -f apass' + ' ' + XX + \
-                                      ' -s mag --type fit' + obstype)
+                                      ' -s mag --type fit' + filestr)
                         except:
                             pass
                 elif field == 'sloan':
@@ -390,14 +391,14 @@ if __name__ == "__main__":
                         print '###', obj
                         try:
                             os.system('lscloop.py -b mag -n ' + obj + ' -e ' + epoch + ' -f ' + field + ' ' + XX + \
-                                      ' -s mag --type fit' + obstype)
+                                      ' -s mag --type fit' + filestr)
                         except:
                             pass
                     elif obj in apasscal:
                         print '###', obj
                         try:
                             os.system('lscloop.py -b mag -n ' + obj + ' -e ' + epoch + ' -f apass' + ' ' + XX + \
-                                      ' -s mag --type fit' + obstype)
+                                      ' -s mag --type fit' + filestr)
                         except:
                             pass
 

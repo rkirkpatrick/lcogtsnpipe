@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 description = "> Ingest reduced data "
-usage = "%(prog)s  -e epoch -T telescope [--obstype obstype]"
+usage = "%(prog)s  -e epoch -T telescope [--filestr filestr]"
 
 import string
 import re, sys
@@ -23,12 +23,12 @@ if __name__ == "__main__":
                       help='type -t type \t [raw/reduced] \n')
     parser.add_argument("-n","--object", dest="object", default='', type=str,
                       help='type --object object \t [name] \n')
-    parser.add_argument("--obstype",nargs="+",type=str,dest="obstype", default=[], help = '--obstype\
+    parser.add_argument("--filestr",nargs="+",type=str,dest="filestr", default=[], help = '--filestr\
                          [e90,e91,e92]\t [%(default)s]\n')
 
 
     args = parser.parse_args()
-    _obstype = args.obstype
+    _filestr = args.filestr
     if args.type not in ['raw', 'redu']:  sys.argv.append('--help')
     if len(sys.argv) < 2:
         sys.argv.append('--help')
@@ -52,21 +52,21 @@ if __name__ == "__main__":
     if not _missing:
         if '-' not in str(epoch):
             epoch0 = datetime.date(int(epoch[0:4]), int(epoch[4:6]), int(epoch[6:8]))
-            pippo = lsc.mysqldef.getlistfromraw(conn, 'photlcoraw', 'dayobs', str(epoch0), '', '*', _telescope, _obstype)
+            pippo = lsc.mysqldef.getlistfromraw(conn, 'photlcoraw', 'dayobs', str(epoch0), '', '*', _telescope, _filestr)
         else:
             epoch1, epoch2 = string.split(epoch, '-')
             start = re.sub('-', '', str(datetime.date(int(epoch1[0:4]), int(epoch1[4:6]), int(epoch1[6:8]))))
             stop = re.sub('-', '', str(datetime.date(int(epoch2[0:4]), int(epoch2[4:6]), int(epoch2[6:8]))))
             pippo = lsc.mysqldef.getlistfromraw(conn, 'photlcoraw', 'dayobs', str(start), str(stop), '*',
-                                                _telescope, _obstype)
+                                                _telescope, _filestr)
         listingested = [i['filename'] for i in pippo]
     else:
         if '-' not in str(epoch):
             epoch0 = re.sub('-', '', str(datetime.date(int(epoch[0:4]), int(epoch[4:6]), int(epoch[6:8]))))
-            pippo = lsc.mysqldef.getmissing(conn, epoch0, '', _telescope, 'photlco', _obstype)
+            pippo = lsc.mysqldef.getmissing(conn, epoch0, '', _telescope, 'photlco', _filestr)
         else:
             epoch1, epoch2 = string.split(epoch, '-')
-            pippo = lsc.mysqldef.getmissing(conn, epoch1, epoch2, _telescope, 'photlco', _obstype)
+            pippo = lsc.mysqldef.getmissing(conn, epoch1, epoch2, _telescope, 'photlco', _filestr)
             print pippo
             print 'here'
         listingested = [i['filename'] for i in pippo]

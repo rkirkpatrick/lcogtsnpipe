@@ -29,14 +29,14 @@ def getconnection(site):
    return  connection[site]['hostname'],connection[site]['username'],connection[site]['passwd'],connection[site]['database']
 
 ########################################################################
-def queryfilenamelike(query,likelist=[],datatable=''):
+def querylike(query, datatable='', column='filename', likelist=[]):
 #Adds onto query a search for entries in the likelist to be within the filename.
     if datatable != '':
         datatable += "."
     if len(likelist) > 0:
-        query += ' AND ( {0}filename LIKE "%{1}%" '.format(datatable, likelist[0])
+        query += ' AND ( {0}{1} LIKE "%{2}%" '.format(datatable, column, likelist[0])
         for i in range(1, len(likelist)):
-            query += ' OR {0}filename LIKE "%{1}%" '.format(datatable,likelist[i])
+            query += ' OR {0}{1} LIKE "%{2}%" '.format(datatable, column, likelist[i])
         query += ")"
     return query
 
@@ -53,11 +53,11 @@ def querytelescope(query,telescope='all',datatable=''):
    return query
 
 
-def getmissing(conn, epoch0, epoch1,telescope='all',datatable='photlco',obstype=[]):
+def getmissing(conn, epoch0, epoch1,telescope='all',datatable='photlco',filestr=[]):
    import sys
    import lsc
    import MySQLdb,os,string
-   print epoch0, epoch1, telescope, obstype
+   print epoch0, epoch1, telescope, filestr
    try:
       cursor = conn.cursor (MySQLdb.cursors.DictCursor)
       query = "SELECT raw.filename,raw.objname FROM photlcoraw AS raw WHERE "
@@ -65,7 +65,7 @@ def getmissing(conn, epoch0, epoch1,telescope='all',datatable='photlco',obstype=
          epoch1 = epoch0
       query += " raw.dayobs <= {0} AND raw.dayobs >= {1} ".format(epoch1,epoch0)
       query = querytelescope(query,telescope,datatable="raw")
-      query = queryfilenamelike(query,obstype)
+      query = querylike(query,likelist=filestr)
       query += " and NOT EXISTS(select * from "+str(datatable)+" as redu where raw.filename = redu.filename)"
       print query
       cursor.execute(query)
@@ -84,7 +84,7 @@ def getfromdataraw(conn, table, column, value, column2='*'):
     return resultSet
 
 
-def getlistfromraw(conn, table, column, value1,value2=None,column2='*',telescope='all', obstype=[]):
+def getlistfromraw(conn, table, column, value1,value2=None,column2='*',telescope='all', filestr=[]):
    import sys
    import lsc
    import MySQLdb,os,string
@@ -94,7 +94,7 @@ def getlistfromraw(conn, table, column, value1,value2=None,column2='*',telescope
          value2 = value1
       query = "select {0} from {1} where {2} <= '{3}' and {4} >= '{5}'".format(column2,table,column,value2,column,value1)
       query = querytelescope(query,telescope)
-      query = queryfilenamelike(query,obstype)
+      query = querylike(query,likelist=filestr)
       cursor.execute(query)
       resultSet = cursor.fetchall ()
       if cursor.rowcount == 0:
