@@ -16,10 +16,10 @@ class OptimalSubtraction:
     '''Implementation of proper image subtraction from Zackey, Ofek, Gal-Yam 2016
        see https://arxiv.org/abs/1601.02655 for details'''
 
-    def __init__(self, Nf, Rf, Pnf, Prf, beta = None, gamma = None):
+    def __init__(self, Nf, Rf, Pnf, Prf, ArgsDict = {}):
         '''Take filenames and turn them into arrays for input into other functions'''
 
-        self.beta, self.gamma = beta, gamma
+        self.ArgsDict = ArgsDict
         self.Nf, self.Rf = Nf, Rf
         self.Pnf, self.Prf = Pnf, Prf
         self.Pn = ExtractPSF(self.Pnf)
@@ -34,7 +34,6 @@ class OptimalSubtraction:
         '''Calculate proper subtraction image and normalize to zero point of reference or target'''
 
         NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
-        print '\nDoing subtractions...'
 
 
         if diagnostic:
@@ -58,7 +57,7 @@ class OptimalSubtraction:
         R = np.copy(RBackground)
         N = np.subtract(NBackground, self.gamma)
 
-        N_hat = np.fft.fft2(N)    
+        N_hat = np.fft.fft2(N)
         R_hat = np.fft.fft2(R)
         Pr_hat = np.fft.fft2(Pr)
         Pn_hat = np.fft.fft2(Pn)
@@ -71,13 +70,109 @@ class OptimalSubtraction:
 
         # apply user's normalization choice
         if normalize == 'i':
-            DNormalize = D * B / self.Fd()
+            DNormalize = D * beta / self.Fd()
         elif normalize == 't':
             DNormalize = D / self.Fd()
         else:
             DNormalize = D
 
         return np.real(DNormalize)
+
+    def S(self):
+        '''Calculate S array'''
+
+        self.CheckGainMatched()
+
+        NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
+        R = np.copy(RBackground)
+        N = np.subtract(NBackground, self.gamma)
+
+        N_hat = np.fft.fft2(N)    
+        R_hat = np.fft.fft2(R)
+        Pr_hat = np.fft.fft2(Pr)
+        Pn_hat = np.fft.fft2(Pn)
+
+        beta = self.beta
+        Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
+
+        Kn = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
+        Kr = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
+
+        Kr2 = np.fft.fft2(np.fft.ifft2(beta ** 2 * Kr) ** 2)
+        Kn2 = np.fft.fft2(np.fft.ifft2(beta * Kn) ** 2)
+
+        S = np.fft.ifft2(beta * Kn * N_hat - beta ** 2 * Kr * R_hat)
+
+        return np.real(S)
+
+
+    def Snoise(self):
+        '''Calculate the noise image for Scorr'''
+        # this whole function needs optimization
+        self.CheckGainMatched()
+
+        NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
+        R = np.copy(RBackground)
+        N = np.subtract(NBackground, self.gamma)
+
+        N_hat = np.fft.fft2(N)    
+        R_hat = np.fft.fft2(R)
+        Pr_hat = np.fft.fft2(Pr)
+        Pn_hat = np.fft.fft2(Pn)
+
+        beta = self.beta
+        Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
+
+        Kn = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
+        Kr = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
+
+        Kr2 = np.fft.fft2(np.fft.ifft2(beta ** 2 * Kr) ** 2)
+        Kn2 = np.fft.fft2(np.fft.ifft2(beta * Kn) ** 2)
+
+        try:
+            VarFilename = self.ArgsDict['rVariance']
+            V_Sn = fits.getdata(VarFilename)
+        except KeyError:
+            V_Sn = np.fft.ifft2(Kn2 * N_hat)
+
+        try:
+            VarFilename = self.ArgsDict['nVariance']
+            V_Sr = fits.getdata(VarFilename)
+        except KeyError:
+            V_Sr = np.fft.ifft2(Kr2 * R_hat)
+
+        f = open('transform')
+        for line in f:
+            if 'xrms' in line:
+                xrms = float(line.split()[1])
+            elif 'yrms' in line:
+                yrms = float(line.split()[1])
+        f.close()
+
+        GradNy, GradNx = np.gradient(np.fft.ifft2(beta * Kn * N_hat))
+        GradRy, GradRx = np.gradient(np.fft.ifft2(beta ** 2 * Kr * R_hat))
+
+        Vr_ast = xrms ** 2 * GradRx ** 2 + yrms ** 2 * GradRy ** 2
+        Vn_ast = xrms ** 2 * GradNx ** 2 + yrms ** 2 * GradNy ** 2
+
+        Snoise = V_Sn + V_Sr + Vr_ast + Vn_ast
+        return np.real(Snoise)
+
+
+    def Scorr(self):
+        '''Calculate Scorr'''
+        return self.S() / np.sqrt(self.Snoise())
+
+    def Fs(self):
+        '''Calculate flux based zeropoint of S'''
+        self.CheckGainMatched()
+        beta = self.beta
+        Pr_hat = np.fft.fft2(self.Pr)
+        Pn_hat = np.fft.fft2(self.Pn)
+        sn, sr = self.sn, self.sr
+        Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
+        Fs = np.sum(beta ** 2 * abs(Pn_hat) * abs(Pr_hat) / Den)
+        return Fs
 
     def Fd(self):
         '''Calculate the flux based zero point of D'''
@@ -98,15 +193,23 @@ class OptimalSubtraction:
     def CheckGainMatched(self):
         '''Check if the gain matching parameters have been found'''
 
-        if self.beta == None or self.gamma == None:
-            # try to get zero point from fits header (not done yet) else fit it manually
-            sources = np.array(sextractor(self.Nf)).transpose()
-            source_index = np.argsort(sources[:, 4])
-            source_sorted = sources[source_index]
+        # if user hasn't supplied beta and gamma, fit them
+        try:
+            self.beta
+            self.gamma
+        except AttributeError:
+            try:
+                self.beta = self.ArgsDict['beta']
+                self.gamma = self.ArgsDict['gamma']
+            except KeyError:
+                print 'Gain matching not done; fitting manually'
+                #sources = np.array(sextractor(self.Nf)).transpose()
+                #source_index = np.argsort(sources[:, 4])
+                #source_sorted = sources[source_index]
 
-            # add support for local gain matching once fitting improves
-            self.MatchGain(catalog = 'grid')#catalog = source_sorted)
-            beta, gamma = self.beta, self.gamma
+                # add support for local gain matching once fitting improves
+                self.beta, self.gamma = self.MatchGain()#catalog = source_sorted)
+
 
 
     def SaveDToDB(self, Df, normalize):
@@ -120,7 +223,8 @@ class OptimalSubtraction:
 
     def MatchGain(self, catalog = 'center'):
         '''Call gain matching function'''
-        self.beta, self.gamma, betaError, gammaError = FitB(self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr, catalog = catalog) # change to include catalog later
+        beta, gamma, betaError, gammaError = FitB(self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr, catalog = catalog) # change to include catalog later
+        return beta, gamma
 
     def SaveImageToWD(self):
         '''Save various images to working directory (testing only)'''
@@ -218,7 +322,7 @@ def FitB(NBackground, RBackground, Pn, Pr, sn, sr, catalog = 'center'):
     '''Fit gain matching (beta) and background (gamma) parameters'''
 
     if catalog is 'center':
-        center, d = NBackground.shape[0] / 2, 200
+        center, d = NBackground.shape[0] / 2, 2000
         a, b = center - d, center + d
         coords = [[a, b, a, b]]
 
@@ -287,7 +391,7 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
     beta0 = 10e5
     gamma0 = 10e5
     i = 0
-    MaxIteration = 4
+    MaxIteration = 5
 
     N_hat = np.fft.fft2(N)    
     R_hat = np.fft.fft2(R)
@@ -326,7 +430,7 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
 
     #plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, RobustFit.fittedvalues, 'r-')
     #plt.show()
-    print 'Beta = ' + str(beta) + ' ' + str(betaError)
+    print 'Beta = ' + str(beta)
     print 'Gamma = ' + str(gamma * np.sqrt(sn**2 + beta ** 2 *sr**2))
     return beta, gamma, betaError, gammaError
 

@@ -359,7 +359,8 @@ if __name__ == "__main__":
                         if _optimal:                            
                             psftarg = imgtarg_path.replace('.fits','.psf.fits')
                             psftemp = imgtemp_path.replace('.fits','.psf.fits')
-                            OptimalSubtraction(imgtarg, imgtemp, psftarg, psftemp).SaveDToDB(imgout, normalize)
+                            d = {'nVariance': 'targnoise.fits', 'rVariance': 'tempnoise.fits'}
+                            OptimalSubtraction(imgtarg, imgtemp, psftarg, psftemp, ArgsDict = d).SaveDToDB(imgout, normalize)
                             # create fields that hotpants does
                             hotpants_fields = {'TARGET': (imgtarg_path, 'target image'),
                                                'TEMPLATE': (imgtemp_path, 'template image'),
