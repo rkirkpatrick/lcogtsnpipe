@@ -23,12 +23,13 @@ def query_photlco_for_targets():
     return query
 
 
-def query_magcomparison_for_redo_targets(_optimal):
+def query_magcomparison_for_redo_targets(_temptel='', _optimal=False):
     # query magcomparison for bad differences
     query = '''SELECT * FROM magcomparison AS p '''
     query += ''' WHERE (p.diffmag = 9999 '''
     query += ''' OR p.outlier = 1) '''
-
+    if _temptel != '':
+        query += ''' AND p.instrument like "%{}%" '''.format(_temptel)
     if _optimal == True:
         query += ''' AND p.filename like '%optimal%' '''
 
@@ -66,15 +67,15 @@ def choose_not_done_mags(db, diffname, _magnitude):
     return mags_to_be_done
 
 
-def create_loop_command(dayobs, objname, obstype=[], filetype=1):
-    if obstype != []:
-        argument_obstype = ' --obstype '
-        for obs in obstype:
-            argument_obstype += obs + ' '
+def create_loop_command(dayobs, objname, filestr=[], filetype=1):
+    if filestr != []:
+        argument_filestr = ' --filestr '
+        for obs in filestr:
+            argument_filestr += obs + ' '
     else:
-        argument_obstype = ''
+        argument_filestr = ''
 
-    command = 'lscloop.py -e ' + dayobs + ' -n ' + objname + argument_obstype + ' --filetype ' + str(filetype)
+    command = 'lscloop.py -e ' + dayobs + ' -n ' + objname + argument_filestr + ' --filetype ' + str(filetype)
     return command
 
 
@@ -111,8 +112,8 @@ def perform_lscloop(command, stage="psf", fwhm='', show='',instrument='fl', opti
     print_and_run_command(command)
 
 
-def do_photometry(dayobs, objname, obstype=[], filetype=1, fwhm='', show=''):
-    loop_command = create_loop_command(dayobs, objname, obstype, filetype)
+def do_photometry(dayobs, objname, filestr=[], filetype=1, fwhm='', show=''):
+    loop_command = create_loop_command(dayobs, objname, filestr, filetype)
     perform_lscloop(loop_command, stage="psf", fwhm=fwhm, show=show)
     perform_lscloop(loop_command, stage="psfmag")
     perform_lscloop(loop_command, stage="zcat")
@@ -153,7 +154,7 @@ def query_for_possible_templates(db, row, _tempdate='',_temptel='fl'):
 
 
 def make_template_psf(temprow, tempfwhm, show):
-    template_psf_command = create_loop_command(temprow['dayobs'], temprow['objname'], obstype=[temprow['filename']], filetype=4)
+    template_psf_command = create_loop_command(temprow['dayobs'], temprow['objname'], filestr=[temprow['filename']], filetype=4)
     print '''Making PSF for the template:'''
     perform_lscloop(template_psf_command, stage='psf', fwhm=tempfwhm, show=show)
     
@@ -179,7 +180,7 @@ def find_and_make_template(db, row, _redo=False, _tempdate='', _temptel='fl', te
 
             temprow = new_templates[0]
             temprow['filename'] = temprow['filename'].replace('.fits', '.temp.fits')
-            new_temp_loop_command = create_loop_command(temprow['dayobs'], temprow['objname'], obstype=[temprow['filename']], filetype=1)
+            new_temp_loop_command = create_loop_command(temprow['dayobs'], temprow['objname'], filestr=[temprow['filename']], filetype=1)
 
             if temprow['psf'] == 'X' or _redo == True:
                 print '''Making a psf for found image'''
@@ -195,20 +196,21 @@ def find_and_make_template(db, row, _redo=False, _tempdate='', _temptel='fl', te
 
     return temprow
 
-def define_different_obstypes(tempname, suffix):
-    fake_img_obstype = ['e93.fits']
-    differencing_obstype = fake_img_obstype + [tempname]
-    post_subtraction_obstype = [fake_img_obstype[0].replace('.fits', suffix)]
-    return fake_img_obstype, differencing_obstype, post_subtraction_obstype
+
+def define_different_filestrs(tempname, suffix):
+    fake_img_filestr = ['e93.fits']
+    differencing_filestr = fake_img_filestr + [tempname]
+    post_subtraction_filestr = [fake_img_filestr[0].replace('.fits', suffix)]
+    return fake_img_filestr, differencing_filestr, post_subtraction_filestr
 
 
-def reduce_fake_source_image(dayobs, objname, inmag, obstype, fwhm, show):
+def reduce_fake_source_image(dayobs, objname, inmag, filestr, fwhm, show):
     # Create fake source image
     source_ingest_command = 'sourceingest.py --force -n ' + objname + ' -e ' + dayobs + ' -m ' + str(inmag)
     print_and_run_command(source_ingest_command)
 
     # Create psf for fakesource image
-    fake_source_command = create_loop_command(dayobs, objname, obstype=obstype)
+    fake_source_command = create_loop_command(dayobs, objname, filestr=filestr)
     perform_lscloop(fake_source_command, stage='psf', fwhm=fwhm, show=show)
 
     # Perform cosmic ray rejection on fakesource image
@@ -236,6 +238,7 @@ def update_magcomparison(diffmag, temprow, id):
     lsc.mysqldef.updatevalue('magcomparison', 'tempdate', temprow['dayobs'], id, filename0='id')
     lsc.mysqldef.updatevalue('magcomparison', 'tempname', temprow['filename'], id, filename0='id')
     lsc.mysqldef.updatevalue('magcomparison', 'temppath', temprow['filepath'], id, filename0='id')
+
 
 def insert_new_into_magcomparison(db, row, temprow, diffname, inmag, diffmag):
     valuedict = {}
@@ -265,7 +268,7 @@ if __name__ == "__main__":
                         help='epoch to search for data \t [%(default)s]')
     parser.add_argument("-r", "--redo", dest="redo", default=False,
                         action="store_true", help="Redo psf when diff is an outlier")
-    parser.add_argument("-F","--fwhm", dest="fwhm", default=None,
+    parser.add_argument("-f","--fwhm", dest="fwhm", default=None,
                         help="Set the fwhm in the PSFs", type=float)
     parser.add_argument("--tempfwhm", dest="tempfwhm", default=None,
                         help="Set the fwhm in the template PSFs", type=float)
@@ -275,7 +278,7 @@ if __name__ == "__main__":
                     help='--temptel  template instrument \t [%(default)s]')
     parser.add_argument('-o','--optimal', dest="optimal", default=False,
                         action="store_true", help="Use optimal image differencing")
-    parser.add_argument('-f', '--force', dest='force', default=False,
+    parser.add_argument('-F', '--force', dest='force', default=False,
                         action='store_true', help="Do subtraction on all specified images, even ones already done.")
     parser.add_argument('-s', '--show', dest='show', default=False,
                         action='store_true', help="Use show when creating PSFs")
@@ -318,7 +321,7 @@ if __name__ == "__main__":
     else:
         show = ''
 
-    # Query Database for images to be source injected and differenced
+    # Query Database for images to be source injected and subtracted
     try:
         hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
         db = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
@@ -326,7 +329,7 @@ if __name__ == "__main__":
         print 'Error: Could not connect to database'
 
     if _redo == True:
-        query = query_magcomparison_for_redo_targets(_optimal)
+        query = query_magcomparison_for_redo_targets(_temptel, _optimal)
     else:
         query = query_photlco_for_targets()
 
@@ -379,22 +382,22 @@ if __name__ == "__main__":
 
                 if _redo == True:
                     # Redo photometry on original images
-                    do_photometry(dayobs, objname, obstype=['e91'], fwhm=fwhm, show=show)
+                    do_photometry(dayobs, objname, filestr=['e91'], fwhm=fwhm, show=show)
 
                 # Reduce the data for each magnitude
                 for inmag in mags_to_be_done:
                     print '''Injecting fake source of magnitude''', inmag
-                    fakeimgobs, diffobs, postobs = define_different_obstypes(tempname, suffix)
+                    fakeimgobs, diffobs, postobs = define_different_filestrs(tempname, suffix)
                     reduce_fake_source_image(dayobs, objname, inmag, fakeimgobs, fwhm, show)
 
                     # Run image subtraction
                     print '''Running difference imaging on fake image'''
-                    diff_command = create_loop_command(dayobs, objname, obstype=diffobs)
+                    diff_command = create_loop_command(dayobs, objname, filestr=diffobs)
                     perform_lscloop(diff_command, stage='diff', instrument=instrument, optimal=optimal, tempdate=tempdate, _temptel=_temptel)
 
                     #Do photometry on difference image
                     print '''Doing photometry on difference image'''
-                    do_photometry(dayobs, objname, obstype=postobs, filetype=3)
+                    do_photometry(dayobs, objname, filestr=postobs, filetype=3)
 
 
                     try:

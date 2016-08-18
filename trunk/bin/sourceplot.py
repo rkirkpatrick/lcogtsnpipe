@@ -28,7 +28,7 @@ def create_magcomparison_query(args):
     if args.bad is False:
         query += ' AND diffmag != 9999 '
 
-    query = lsc.mysqldef.queryfilenamelike(query, args.obstype)
+    query = lsc.mysqldef.querylike(query, likelist=args.filestr)
 
     if args.magnitude != []:
         query += ' AND ( inmag = {0} '.format(args.magnitude[0])
@@ -209,8 +209,8 @@ if __name__ == "__main__":
                         default=False, help="Keep outliers in data")
     parser.add_argument("-u","--updateout", dest="updateout", action="store_true",
                         default=False, help="Update the outliers in the database")
-    parser.add_argument("--obstype", nargs="+", type=str, dest="obstype", default=[], help='--obstype\
-                        [e90,e91,e93]\t [%(default)s]\n')
+    parser.add_argument("--filestr",nargs="+",type=str,dest="filestr", default=[],
+                        help='Enter part(s) of the filename you want to search for')
 
     args = parser.parse_args()
     _name = args.name
@@ -222,7 +222,7 @@ if __name__ == "__main__":
     _bad = args.bad
     _keepout = args.keepout
     _updateout = args.updateout
-    _obstype = args.obstype
+    _filestr = args.filestr
 
     resultSet = produce_result_set(args)
 
