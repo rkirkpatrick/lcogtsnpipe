@@ -196,9 +196,9 @@ def find_and_make_template(db, row, _redo=False, _tempdate='', _temptel='fl', te
     return temprow
 
 def define_different_obstypes(tempname, suffix):
-    fake_img_obstype = ['e93']
+    fake_img_obstype = ['e93.fits']
     differencing_obstype = fake_img_obstype + [tempname]
-    post_subtraction_obstype = [fake_img_obstype[0] + suffix]
+    post_subtraction_obstype = [fake_img_obstype[0].replace('.fits', suffix)]
     return fake_img_obstype, differencing_obstype, post_subtraction_obstype
 
 
