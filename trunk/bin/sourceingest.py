@@ -2,13 +2,9 @@
 """
 How to run it now:
 
-sourceingest.py -e YYYYMMDD-YYYYMMDD 
-lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -s psf
-lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -s psfmag -c
-lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -n OBJNAME -s zcat --zcatnew
-lscloop.py -e YYYYMMDD-YYYYMMDD --obstype e93 -s mag
+sourceingest.py -e YYYYMMDD-YYYYMMDD
 
-If you use --move, you must use --RAS and --DEC in lscloop.py
+If you use move the source, you must use --RAS and --DECS in lscloop.py
 -s psfmag. Otherwise, it won't chose the new source.
 
 """
@@ -17,7 +13,6 @@ import sys
 
 import MySQLdb
 import numpy as np
-from numpy import pi
 import astropy.io.fits as pyfits
 from astropy import wcs
 from astropy.coordinates import Angle
@@ -32,20 +27,21 @@ from sourcesub import print_and_run_command
 ################################Functions#####################################
 ##############################################################################
 def query_for_files(conn, args):
-    query = 'SELECT * FROM photlco WHERE filename LIKE "%e91%"\
-                   AND z1 != 9999 AND filetype = 1 '
+    query ='SELECT * FROM photlco AS p LEFT JOIN photlcoraw AS pr '
+    query += 'ON p.filename = pr.filename '
+    query += 'WHERE p.filename LIKE "%e91%" AND p.z1 != 9999 AND p.filetype = 1 '
 
     if '-' not in str(args.epoch):
-        query += ' AND dayobs = {0} '.format(args.epoch)
+        query += ' AND p.dayobs = {0} '.format(args.epoch)
     else:
         epoch1, epoch2 = args.epoch.split('-')
-        query += ' AND dayobs >= {0} AND dayobs <= {1} '.format(epoch1, epoch2)
+        query += ' AND p.dayobs >= {0} AND p.dayobs <= {1} '.format(epoch1, epoch2)
     
     if args.filename != []:
-        query = lsc.mysqldef.queryfilenamelike(query, args.filename)
+        query = lsc.mysqldef.querylike(query, likelist=args.filestr, column='filename', datatable='p')
     
     if args.name != '':
-        query += ' AND objname = "{0}" '.format(args.name)
+        query += ' AND p.objname = "{0}" '.format(args.name)
 
     resultSet = lsc.mysqldef.sqlquery(conn, query)
 
@@ -71,14 +67,13 @@ def comparefakemag(ofilep, magnitude):
 
 
 def findzeropoint(row):
-    zeropoint = 23
     if row['zcol1'] == "gr":
         zeropoint = row['z1']
-    if row['zcol2'] == "gr":
+    elif row['zcol2'] == "gr":
         zeropoint = row['z2']
-
-    print zeropoint
-
+    else:
+        print "No gr zeropoint"
+    print "Zeropoint:", zeropoint
     return zeropoint
 
 
@@ -86,15 +81,15 @@ def get_ra_and_dec(row, args):
     if args.ras != None:
         ra = args.ras
     else:
-        ra = row['ra0']
+        ra = row['cat_ra']
+
+    ra = Angle(ra, unit=u.deg)
+    sexa_ra = ra.to_string(unit=u.hour, sep=':')
 
     if args.decs != None:
         dec = args.decs
     else:
-        dec = row['dec0']
-
-    ra = Angle(ra, unit=u.deg)
-    sexa_ra = ra.to_string(unit=u.hour, sep=':')
+        dec = row['cat_dec']
 
     dec = Angle(dec, unit=u.deg)
     sexa_dec = dec.to_string(unit=u.degree, sep=':')
@@ -148,7 +143,7 @@ def degs2coords(ra,dec,header):
 def magnitude2amplitude(psf, airmass, zeropoint, magnitude, exptime):
     filter = 0.203
     counts = float((10**((magnitude - zeropoint + (airmass*filter))/-2.5))*exptime)
-    print counts
+    print 'Counts:', counts
     amplitude = float(counts / np.sum(psf,dtype=float))
     return amplitude
 
@@ -156,7 +151,7 @@ def magnitude2amplitude(psf, airmass, zeropoint, magnitude, exptime):
 def source_drop(ifilep, ofilep, magnitude, row, args):
     """
     Copies ifile into ofile. Drops a psf into ofile, depending
-    if magnitude exists. Then to all ofile 'FAKEMAG' is added to the header
+    if magnitude exists. Then 'FAKEMAG' is added to the header of the ofile
     to describe the magnitude of the dropped source. If there is no
     magnitude, the 'FAKEMAG' header will be set as an empty string.
     """
@@ -191,13 +186,9 @@ def source_drop(ifilep, ofilep, magnitude, row, args):
     del HDU
 
 
-def ingest_into_photlco(args):
-    if args.name != '':
-        name = ' -n ' + args.name + ''
-    else:
-        name = ''
-
-    epoch = "-e " + args.epoch
+def ingest_into_photlco(row):
+    name = ' -n ' + str(row['objname'])
+    epoch = ' -e ' + str(row['dayobs'])
 
     print '\n', ('#' * 75)
     command = 'lscingestredudata.py --obstype e93 -m ' + epoch + name
@@ -208,13 +199,12 @@ def ingest_into_photlco(args):
 description='Creates e93 files where e93 files have an inserted psf based'\
             'off of the e91 file.'
 usage='%(prog)s -e epoch [-f filename -m magnitude]'
-version='%(prog)s 1.0'
 
 if __name__ == "__main__":	
     from argparse import ArgumentParser
-    parser = ArgumentParser(description=description,usage=usage,version=version)
-    parser.add_argument("-f", "--filename", nargs='+',default=[],help="A "\
-                        "list to search for specific filenames")
+    parser = ArgumentParser(description=description,usage=usage)
+    parser.add_argument("--filestr", nargs="+", type=str, dest="filestr", default=[],
+                        help='Enter part(s) of the filename you want to search for')
     parser.add_argument("-n", "--name", dest="name", default='', type=str,
                         help='-n object name')
     parser.add_argument("-m", "--magnitude",type=float, default=None, help=
@@ -230,7 +220,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     _magnitude = args.magnitude
-    _filename = args.filename
+    _filestr = args.filestr
     _name = args.name
     _epoch = args.epoch
     _force = args.force
@@ -254,21 +244,19 @@ if __name__ == "__main__":
         filepath = row['filepath']
         ifilep = filepath + ifile
         ofilep = filepath + ofile
-        print '#'* 75, '\n', ifile
+        print '#' * 75, '\n', ifile
 
         magnitude = choosemagnitude(args.magnitude)
 
-        preexistrow =  lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
+        preexistrow = lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
         if preexistrow and _force == False and comparefakemag(ofilep, magnitude) == True:
             print ofile, "already created with magnitude of", magnitude
         else:
             lsc.mysqldef.deleteredufromarchive(ofile,"photlcoraw")
             lsc.mysqldef.deleteredufromarchive(ofile,"photlco")
-            print "Dropping source of magnitude", magnitude, " into", ofile, '\n'
+            print "Dropping source of magnitude", magnitude, "into", ofile
             source_drop(ifilep, ofilep, magnitude, row, args)
             db_ingest(filepath,ofile,force=True)
-
-
-    ingest_into_photlco(args)
+            ingest_into_photlco(row)
 
 
