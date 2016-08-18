@@ -152,20 +152,8 @@ def query_for_possible_templates(db, row, _tempdate='',_temptel='fl'):
     return fileinfo
 
 
-def items_from_temp(templates):
-    tempdate = templates[0]['dayobs']
-    temppsf = templates[0]['psf']
-    objname = templates[0]['objname']
-    tempname = templates[0]['filename']
-
-    return tempdate, tempname, temppsf, objname
-
-
-def make_template_psf(templates, tempfwhm, show):
-    tempdate, tempname, temppsf, objname = items_from_temp(templates)
-    # if "temp" not in tempname:
-    #     tempname = tempname.replace('.fits','.temp.fits')
-    template_psf_command = create_loop_command(tempdate, objname, obstype=[tempname], filetype=4)
+def make_template_psf(temprow, tempfwhm, show):
+    template_psf_command = create_loop_command(temprow['dayobs'], temprow['objname'], obstype=[temprow['filename']], filetype=4)
     print '''Making PSF for the template:'''
     perform_lscloop(template_psf_command, stage='psf', fwhm=tempfwhm, show=show)
     
@@ -175,12 +163,12 @@ def find_and_make_template(db, row, _redo=False, _tempdate='', _temptel='fl', te
     previous_templates = query_for_previous_templates(db, row, _tempdate=_tempdate, _temptel=_temptel)
     # if LCOGT template exists and you don't want to redo the psfs:
     if len(previous_templates) > 0:
-        tempdate, tempname, temppsf, objname = items_from_temp(previous_templates)
-        print '''Found LCOGT template from %s.''' % tempdate
+        temprow = previous_templates[0]
+        print '''Found LCOGT template from %s.''' % temprow['dayobs']
         
         # does the template have a good PSF?
-        if temppsf == 'X' or _redo == True:
-            make_template_psf(previous_templates, tempfwhm, show)
+        if temprow['psf'] == 'X' or _redo == True:
+            make_template_psf(temprow, tempfwhm, show)
 
     # If old templates don't exist or you want to redo data
     else:
@@ -189,24 +177,23 @@ def find_and_make_template(db, row, _redo=False, _tempdate='', _temptel='fl', te
         if len(new_templates) > 0:
             print '''Found LCOGT image to use as template. Will convert to template:'''
 
-            tempdate, filename, temppsf, objname = items_from_temp(new_templates)
-            tempname = filename.replace('.fits', '.temp.fits')
-            new_temp_loop_command = create_loop_command(tempdate, objname, obstype=[filename], filetype=1)
+            temprow = new_templates[0]
+            temprow['filename'] = temprow['filename'].replace('.fits', '.temp.fits')
+            new_temp_loop_command = create_loop_command(temprow['dayobs'], temprow['objname'], obstype=[temprow['filename']], filetype=1)
 
-            if temppsf == 'X' or _redo == True:
+            if temprow['psf'] == 'X' or _redo == True:
                 print '''Making a psf for found image'''
                 perform_lscloop(new_temp_loop_command, stage='psf', fwhm=tempfwhm, show=show)
 
             print '''Converting image to template:'''
             perform_lscloop(new_temp_loop_command, stage='template')
 
-            make_template_psf(new_templates, tempfwhm, show)
+            make_template_psf(temprow, tempfwhm, show)
         else:
             print "Error! No images available with same object name!"
-            tempdate, tempname = '', ''
+            temprow = {'dayobs':'', 'filename':'', 'filepath':''}
 
-    return tempdate, tempname
-
+    return temprow
 
 def define_different_obstypes(tempname, suffix):
     fake_img_obstype = ['e93']
@@ -243,12 +230,14 @@ def query_for_preexisting_row(db, diffname, inmag):
     return preexistrow
 
 
-def update_magcomparison(diffmag, id):
+def update_magcomparison(diffmag, temprow, id):
     lsc.mysqldef.updatevalue('magcomparison', 'outlier', False, id, filename0='id')
     lsc.mysqldef.updatevalue('magcomparison', 'diffmag', diffmag, id, filename0='id')
+    lsc.mysqldef.updatevalue('magcomparison', 'tempdate', temprow['dayobs'], id, filename0='id')
+    lsc.mysqldef.updatevalue('magcomparison', 'tempname', temprow['filename'], id, filename0='id')
+    lsc.mysqldef.updatevalue('magcomparison', 'temppath', temprow['filepath'], id, filename0='id')
 
-
-def insert_new_into_magcomparison(db, row, diffname, inmag, diffmag):
+def insert_new_into_magcomparison(db, row, temprow, diffname, inmag, diffmag):
     valuedict = {}
     valuedict['targetid'] = row['targetid']
     valuedict['filepath'] = row['filepath']
@@ -258,6 +247,9 @@ def insert_new_into_magcomparison(db, row, diffname, inmag, diffmag):
     valuedict['inmag'] = inmag
     valuedict['diffmag'] = diffmag
     valuedict['instrument'] = row['instrument']
+    valuedict['tempdate'] = temprow['dayobs']
+    valuedict['tempname'] = temprow['filename']
+    valuedict['temppath'] = temprow['filepath']
     lsc.mysqldef.insert_values(db, 'magcomparison', valuedict)
 
 
@@ -357,19 +349,17 @@ if __name__ == "__main__":
 
         if _redo == False:
             diffname = filename.replace('e91.fits', 'e93' + suffix)
-
             # If false, remove from the mags to be done inmags that have already been done
             # So if true, the do all magnitudes specified
             if _force == False:
                 mags_to_be_done = choose_not_done_mags(db, diffname, _magnitude)
+        else:
+            diffname = filename
+            mags_to_be_done = row['inmag']
 
         # If magnitudes have not been done yet for the image
         if len(mags_to_be_done) > 0:
-            if _redo == True:
-                # Redo photometry on original images
-                do_photometry(dayobs, objname, obstype=['e91'], fwhm=fwhm, show=show)
-
-            print '\n', '''Checking for template images for %(dayobs)s target %(objname)s.''' % row
+            print '''Checking for template images for %(dayobs)s target %(objname)s.''' % row
 
             # fix WCS if failed?
             if _redo == False:
@@ -377,13 +367,19 @@ if __name__ == "__main__":
                     bad_wcs_loop_command = create_loop_command(dayobs, objname)
                     perform_lscloop(bad_wcs_loop_command, stage='wcs')
 
-            tempdate, tempname = find_and_make_template(db, row, _redo, _tempdate, _temptel, tempfwhm, show)
+            temprow = find_and_make_template(db, row, _redo, _tempdate, _temptel, tempfwhm, show)
+            tempdate = temprow['dayobs']
+            tempname = temprow['filename']
 
             # If a template exists
             if tempdate != '':
                 print '''Performing cosmic-ray rejection on template:'''
                 template_cosmic_command = create_loop_command(tempdate, objname, filetype=4)
                 perform_lscloop(template_cosmic_command, stage='cosmic')
+
+                if _redo == True:
+                    # Redo photometry on original images
+                    do_photometry(dayobs, objname, obstype=['e91'], fwhm=fwhm, show=show)
 
                 # Reduce the data for each magnitude
                 for inmag in mags_to_be_done:
@@ -402,26 +398,18 @@ if __name__ == "__main__":
 
 
                     try:
-                        if _redo == False:
-                            diffmag = get_new_diffmag(db, diffname)# This diffname is edited from photlco
-                            print diffmag
-                            preexistrow = query_for_preexisting_row(db, diffname, inmag)
-                            print preexistrow
-                            if len(preexistrow) > 0:
-                                # update db with new data
-                                print ("Data exists for magnitude of " + str(inmag) + ", so magcomparsion will be updated")
-                                update_magcomparison(diffmag, preexistrow[0]['id'])
-                            else:
-                                #put values into dictionary, then insert into magcomparison db
-                                print("A row doesn't already exist. Inserting values into magcomparison.")
-                                insert_new_into_magcomparison(db, row, diffname, inmag, diffmag)
-
-                        if _redo == True:
-                            diffname = row['filename'] # this row is from magcomparison
-                            diffmag = get_new_diffmag(db, diffname)
-                            print "Database is being updated with redone photometry and a diffmag of", diffmag
-                            update_magcomparison(diffmag, row['id'])
-
+                        diffmag = get_new_diffmag(db, diffname)# This diffname is edited from photlco
+                        print diffmag
+                        preexistrow = query_for_preexisting_row(db, diffname, inmag)
+                        print preexistrow
+                        if len(preexistrow) > 0:
+                            # update db with new data
+                            print "Database is being updated for an inmag of", inmag, "and a diffmag of", diffmag
+                            update_magcomparison(diffmag, temprow, preexistrow[0]['id'])
+                        else:
+                            #put values into dictionary, then insert into magcomparison db
+                            print("A row doesn't already exist. Inserting values into magcomparison.")
+                            insert_new_into_magcomparison(db, row, temprow, diffname, inmag, diffmag)
                     except:
                         print "Something went wrong with difference image photometry"
         else:
@@ -439,6 +427,6 @@ if __name__ == "__main__":
 
     # CREATE TABLE magcomparison( id bigint(20) UNSIGNED NOT NULL PRIMARY KEY AUTO_INCREMENT,
     #      targetid bigint(20) NOT NULL, instrument text DEFAULT NULL, filepath text DEFAULT NULL,
-    #      filename varchar(100) DEFAULT NULL, dayobs text DEFAULT NULL,
-    #      objname text DEFAULT NULL, inmag double DEFAULT 9999,
-    #      diffmag double DEFAULT 9999, outlier boolean DEFAULT false);
+    #      filename varchar(100) DEFAULT NULL, temppath text DEFAULT NULL, tempname varchar(100) DEFAULT NULL,
+    #      tempdate text DEFAULT NULL, dayobs text DEFAULT NULL, objname text DEFAULT NULL,
+    #      inmag double DEFAULT 9999, diffmag double DEFAULT 9999, outlier boolean DEFAULT false);
