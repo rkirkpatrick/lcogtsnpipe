@@ -26,39 +26,95 @@ from pyraf import iraf
 
 import lsc
 from LCOGTingest import db_ingest
+from sourcesub import print_and_run_command
 
 ##############################################################################
-#############################Ingest Functions#################################
+################################Functions#####################################
 ##############################################################################
-def choosemagnitude():
-    if np.random.randint(2) == 0:
-        return None
+def query_for_files(conn, args):
+    query = 'SELECT * FROM photlco WHERE filename LIKE "%e91%"\
+                   AND z1 != 9999 AND filetype = 1 '
+
+    if '-' not in str(args.epoch):
+        query += ' AND dayobs = {0} '.format(args.epoch)
     else:
-        i = np.random.uniform(15,20)
-        return i
+        epoch1, epoch2 = args.epoch.split('-')
+        query += ' AND dayobs >= {0} AND dayobs <= {1} '.format(epoch1, epoch2)
+    
+    if args.filename != []:
+        query = lsc.mysqldef.queryfilenamelike(query, args.filename)
+    
+    if args.name != '':
+        query += ' AND objname = "{0}" '.format(args.name)
 
-def comparefakesourcemagnitude(ofilep, magnitude):
+    resultSet = lsc.mysqldef.sqlquery(conn, query)
+
+    return resultSet
+
+
+def choosemagnitude(_magnitde=None):
+    if _magnitude == None:
+        if np.random.randint(2) == 0:
+            mag = None
+        else:
+            mag = np.random.uniform(14,20)
+    else:
+        mag = _magnitude
+
+    return mag
+
+
+def comparefakemag(ofilep, magnitude):
     hdulist1 = pyfits.open(ofilep)
     header1 = hdulist1[0].header
     return(header1['FAKEMAG'] == magnitude)
 
 
-def findzeropoint(z1, z2, zcol1, zcol2):
+def findzeropoint(row):
     zeropoint = 23
-    if zcol1 == "gr":
-        zeropoint = z1
-    if zcol2 == "gr":
-        zeropoint = z2
+    if row['zcol1'] == "gr":
+        zeropoint = row['z1']
+    if row['zcol2'] == "gr":
+        zeropoint = row['z2']
+
+    print zeropoint
+
     return zeropoint
 
 
+def get_ra_and_dec(row, args):
+    if args.ras != None:
+        ra = args.ras
+    else:
+        ra = row['ra0']
+
+    if args.decs != None:
+        dec = args.decs
+    else:
+        dec = row['dec0']
+
+    ra = Angle(ra, unit=u.deg)
+    sexa_ra = ra.to_string(unit=u.hour, sep=':')
+
+    dec = Angle(dec, unit=u.deg)
+    sexa_dec = dec.to_string(unit=u.degree, sep=':')
+
+    return sexa_ra, sexa_dec
+
+
+def get_parameters(row, args):
+    sexa_ra, sexa_dec = get_ra_and_dec(row, args)
+    zeropoint = findzeropoint(row)
+    airmass = row['airmass']
+
+    return sexa_ra, sexa_dec, zeropoint, airmass
+
+
 def sexa2deg(ra,dec):
-    ra = Angle(ra,u.hour).degree
-    dec = Angle(dec,u.degree).degree
+    ra = Angle(ra, u.hour).degree
+    dec = Angle(dec, u.degree).degree
     return ra, dec
-##############################################################################
-##############################Drop PSF########################################
-##############################################################################
+
 
 def createpsf(shape,xpos,ypos,ifilep):
     from iraf import daophot
@@ -97,7 +153,7 @@ def magnitude2amplitude(psf, airmass, zeropoint, magnitude, exptime):
     return amplitude
 
 
-def source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint, magnitude=None, _move=False):
+def source_drop(ifilep, ofilep, magnitude, row, args):
     """
     Copies ifile into ofile. Drops a psf into ofile, depending
     if magnitude exists. Then to all ofile 'FAKEMAG' is added to the header
@@ -109,15 +165,14 @@ def source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint, magnitude=None, _mo
     hdr = HDU[0].header
     shape = inimage.shape
 
-    if _move == True:
-        hdr['RA'] = hdr['CAT-RA'] = hdr['OFST-RA'] = ra
-        hdr['DEC'] = hdr['CAT-DEC'] = hdr['OFST-DEC'] = dec
+    sexa_ra, sexa_dec, airmass, zeropoint = get_parameters(row, args)
+
+    if args.ras != None or args.decs != None:
+        hdr['RA'] = hdr['CAT-RA'] = hdr['OFST-RA'] = sexa_ra
+        hdr['DEC'] = hdr['CAT-DEC'] = hdr['OFST-DEC'] = sexa_dec
         HDU[0].header = hdr
 
-        ra, dec = sexa2deg(ra,dec)
-        print '#'*75
-        print 'Use this RAS and DECS for lscloop.py -s psfmag:', ra, dec
-        print '#'*75
+    ra, dec = sexa2deg(sexa_ra, sexa_dec)
 
     if magnitude != None:
         xpos, ypos = degs2coords(ra,dec,hdr)	
@@ -135,6 +190,20 @@ def source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint, magnitude=None, _mo
     HDU.close()
     del HDU
 
+
+def ingest_into_photlco(args):
+    if args.name != '':
+        name = ' -n ' + args.name + ''
+    else:
+        name = ''
+
+    epoch = "-e " + args.epoch
+
+    print '\n', ('#' * 75)
+    command = 'lscingestredudata.py --obstype e93 -m ' + epoch + name
+    print_and_run_command(command)
+
+
 ##############################################################################
 description='Creates e93 files where e93 files have an inserted psf based'\
             'off of the e91 file.'
@@ -147,20 +216,17 @@ if __name__ == "__main__":
     parser.add_argument("-f", "--filename", nargs='+',default=[],help="A "\
                         "list to search for specific filenames")
     parser.add_argument("-n", "--name", dest="name", default='', type=str,
-                      help='-n object name   \t [%(default)s]')
+                        help='-n object name')
     parser.add_argument("-m", "--magnitude",type=float, default=None, help=
                         "Use a specific magnitude when computing PSF")
     parser.add_argument("-e", "--epoch", dest="epoch", default='', type=str,
-                      help='epoch to reduce  \t [%(default)s]')
+                        help='epoch to reduce')
     parser.add_argument("-F", "--force", dest="force", action="store_true")
-    parser.add_argument("--move",dest="move",action="store_true",
-                        default=False, help="Move the placed source")
-    parser.add_argument("--ra", dest="ra", default='', type=str,
-                        help="Manually input RA")
-    parser.add_argument("--dec", dest="dec", default='', type=str,
-                        help="Manually input DEC")
-    parser.add_argument("--negdec", dest="negdec",action="store_true",
-                        default=False, help="Add negative sign to DEC")
+    parser.add_argument("--RAS", dest="ras", default=None, type=float,
+                        help='Manually input right ascension in degrees')
+    parser.add_argument("--DECS", dest="decs", default=None, type=float,
+                        help='Manually input declination in degrees')
+
 
     args = parser.parse_args()
     _magnitude = args.magnitude
@@ -168,109 +234,41 @@ if __name__ == "__main__":
     _name = args.name
     _epoch = args.epoch
     _force = args.force
-    _move = args.move
-    _ra = args.ra
-    _dec = args.dec
-    _negdec = args.negdec
+    _ras = args.ras
+    _decs = args.decs
 
     if (_epoch == ''):
         sys.argv.append('--help')
         args = parser.parse_args()
 
-    if(_move == True and (_ra == '' or _dec == '')):
-        sys.argv.append('--help')
-        args = parser.parse_args()
-
-    if _negdec == True:
-        _dec = "-" + _dec
 
     hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
     conn = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
-    query_files = 'SELECT filename FROM photlco WHERE filename LIKE "%e91%"\
-                   AND z1 != 9999 AND filetype = 1 '
+    resultSet = query_for_files(conn, args)
 
-    epoch = "-e " + _epoch
-    if '-' not in str(_epoch):
-        query_files += ' AND dayobs = {0} '.format(_epoch)
-    else:
-        epoch1, epoch2 = _epoch.split('-')
-        query_files += ' AND dayobs >= {0} AND dayobs <= {1} '.format(epoch1,epoch2)
-
-    if _filename != []:
-        query_files = lsc.mysqldef.queryfilenamelike(query_files,_filename)
-
-    if _name != '':
-        query_files += ' AND objname = "{0}" '.format(_name)
-        name = ' -n ' + _name + ' '
-    else:
-        name = ''
-
-    c = conn.cursor()
-    c.execute(query_files)
-    r = c.fetchall()
-    rname = ()
-    for row in r:
-        rtuple = (row[0],)
-        rname = rname + rtuple
-
-    for ifile in rname:
-        print '#'* 75, '\n', ifile
-        ofile = ifile.replace('e91','e93')
-        if _move == True:
+    for row in resultSet:
+        ifile = row['filename']
+        ofile = ifile.replace('e91', 'e93')
+        if _ras != None or _decs != None:
             ofile = ofile.replace('.fits','.moved.fits')
-        if _magnitude == None:
-            magnitude = choosemagnitude()
-        else:
-            magnitude = _magnitude
-
-        query_join = 'SELECT * FROM photlco LEFT JOIN photlcoraw ON ' \
-                     'photlco.filename = photlcoraw.filename WHERE ' \
-                     'photlco.filename LIKE "%{0}%";'.format(ifile)
-
-        conn.query(query_join)
-        rcomb = conn.store_result()		
-        rcomb = rcomb.fetch_row(how=2)
-        rcomb = rcomb[0]
-        filepath = rcomb["photlco.filepath"]
+        filepath = row['filepath']
         ifilep = filepath + ifile
         ofilep = filepath + ofile
+        print '#'* 75, '\n', ifile
 
-        if _ra != '':
-            ra = _ra
-        else:
-            ra = rcomb["photlcoraw.cat_ra"]
-
-        if _dec != '':
-            dec = _dec
-        else:
-            dec = rcomb["photlcoraw.cat_dec"]
-
-        zeropoint = findzeropoint(rcomb["photlco.z1"],rcomb["photlco.z2"],rcomb["photlco.zcol1"],
-                                  rcomb["photlco.zcol2"])
-        print zeropoint
-        airmass = rcomb["photlco.airmass"]
+        magnitude = choosemagnitude(args.magnitude)
 
         preexistrow =  lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
-        if preexistrow:
-            if _force == False and comparefakesourcemagnitude(ofilep,magnitude) == True:
-                print ofile, "already created with magnitude of", magnitude
-            else:
-                lsc.mysqldef.deleteredufromarchive(ofile,"photlcoraw")
-                lsc.mysqldef.deleteredufromarchive(ofile,"photlco")
-                print "Deleted old", ofile, "from archive"
-                print "Dropping source of magnitude", magnitude, " into", ofile, '\n'
-                source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint,
-                            magnitude, _move)
-                db_ingest(filepath,ofile,force=True)
+        if preexistrow and _force == False and comparefakemag(ofilep, magnitude) == True:
+            print ofile, "already created with magnitude of", magnitude
         else:
-                print "Dropping source into", ofile, '\n'
-                source_drop(ifilep, ofilep, ra, dec, airmass, zeropoint,
-                            magnitude, _move)
-                db_ingest(filepath,ofile,force=True)
+            lsc.mysqldef.deleteredufromarchive(ofile,"photlcoraw")
+            lsc.mysqldef.deleteredufromarchive(ofile,"photlco")
+            print "Dropping source of magnitude", magnitude, " into", ofile, '\n'
+            source_drop(ifilep, ofilep, magnitude, row, args)
+            db_ingest(filepath,ofile,force=True)
 
 
-    print '\n',('#' * 75)
-    command = 'lscingestredudata.py --obstype e93 -m ' + epoch + name
-    print command, '\n'
-    os.system(command)
+    ingest_into_photlco(args)
+
 
