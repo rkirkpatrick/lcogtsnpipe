@@ -165,7 +165,7 @@ def source_drop(ifilep, ofilep, magnitude, row, args):
     hdr = HDU[0].header
     shape = inimage.shape
 
-    sexa_ra, sexa_dec, airmass, zeropoint = get_parameters(row, args)
+    sexa_ra, sexa_dec, zeropoint, airmass = get_parameters(row, args)
 
     if args.ras != None or args.decs != None:
         hdr['RA'] = hdr['CAT-RA'] = hdr['OFST-RA'] = sexa_ra
