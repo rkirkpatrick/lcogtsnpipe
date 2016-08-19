@@ -75,6 +75,7 @@ class OptimalSubtraction:
             DNormalize = D / self.Fd()
         else:
             DNormalize = D
+        self.D_ = np.real(DNormalize)
 
         return np.real(DNormalize)
 
@@ -82,28 +83,24 @@ class OptimalSubtraction:
         '''Calculate S array'''
 
         self.CheckGainMatched()
-
-        NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
-        R = np.copy(RBackground)
-        N = np.subtract(NBackground, self.gamma)
-
-        N_hat = np.fft.fft2(N)    
-        R_hat = np.fft.fft2(R)
-        Pr_hat = np.fft.fft2(Pr)
-        Pn_hat = np.fft.fft2(Pn)
-
-        beta = self.beta
-        Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
-
-        Kn = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
-        Kr = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
-
-        Kr2 = np.fft.fft2(np.fft.ifft2(beta ** 2 * Kr) ** 2)
-        Kn2 = np.fft.fft2(np.fft.ifft2(beta * Kn) ** 2)
-
-        S = np.fft.ifft2(beta * Kn * N_hat - beta ** 2 * Kr * R_hat)
-
+        try:
+            S_hat = self.Fd_ * np.fft.fft2(self.D_) * np.conj(np.fft.fft2(self.Pd_))
+            S = np.fft.ifft2(S_hat)
+        except AttributeError:
+            S_hat = self.Fd() * np.fft.fft2(self.D()) * np.conj(np.fft.fft2(self.Pd()))
+            S = np.fft.ifft2(S_hat)
+        self.S_ = np.real(S)
         return np.real(S)
+
+    def Flux(self):
+        '''Calculate transient Flux'''
+        self.CheckGainMatched()
+        try:
+            Flux = self.S_ / self.Fs_
+        except AttributeError:
+            Flux = self.S() / self.Fs()
+        self.Flux_ = Flux
+        return Flux
 
 
     def Snoise(self):
@@ -123,23 +120,24 @@ class OptimalSubtraction:
         beta = self.beta
         Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
 
-        Kn = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
-        Kr = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
-
-        Kr2 = np.fft.fft2(np.fft.ifft2(beta ** 2 * Kr) ** 2)
-        Kn2 = np.fft.fft2(np.fft.ifft2(beta * Kn) ** 2)
-
-        try:
-            VarFilename = self.ArgsDict['rVariance']
-            V_Sn = fits.getdata(VarFilename)
-        except KeyError:
-            V_Sn = np.fft.ifft2(Kn2 * N_hat)
+        Kn_hat = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
+        Kr_hat = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
+        Kn2_hat = np.fft.fft2(np.fft.ifft2(beta * Kn_hat) ** 2)
+        Kr2_hat = np.fft.fft2(np.fft.ifft2(beta ** 2 * Kr_hat) ** 2)
 
         try:
             VarFilename = self.ArgsDict['nVariance']
-            V_Sr = fits.getdata(VarFilename)
+            EpsN = fits.getdata(VarFilename)
+            V_Sn = np.fft.ifft2(Kr2_hat * np.fft.fft2(EpsN))
         except KeyError:
-            V_Sr = np.fft.ifft2(Kr2 * R_hat)
+            V_Sn = np.fft.ifft2(Kn2_hat * N_hat)
+
+        try:
+            VarFilename = self.ArgsDict['rVariance']
+            EpsR = fits.getdata(VarFilename)
+            V_Sr = np.fft.ifft2(Kr2_hat * np.fft.fft2(EpsN))
+        except KeyError:
+            V_Sr = np.fft.ifft2(Kr2_hat * R_hat)
 
         f = open('transform')
         for line in f:
@@ -149,19 +147,25 @@ class OptimalSubtraction:
                 yrms = float(line.split()[1])
         f.close()
 
-        GradNy, GradNx = np.gradient(np.fft.ifft2(beta * Kn * N_hat))
-        GradRy, GradRx = np.gradient(np.fft.ifft2(beta ** 2 * Kr * R_hat))
+        GradNy, GradNx = np.gradient(np.fft.ifft2(beta * Kn_hat * N_hat))
+        GradRy, GradRx = np.gradient(np.fft.ifft2(beta ** 2 * Kr_hat * R_hat))
 
         Vr_ast = xrms ** 2 * GradRx ** 2 + yrms ** 2 * GradRy ** 2
         Vn_ast = xrms ** 2 * GradNx ** 2 + yrms ** 2 * GradNy ** 2
 
-        Snoise = V_Sn + V_Sr + Vr_ast + Vn_ast
+        Snoise = V_Sn + V_Sr #+ Vr_ast + Vn_ast
+        self.Snoise_ = np.real(Snoise)
         return np.real(Snoise)
 
 
     def Scorr(self):
         '''Calculate Scorr'''
-        return self.S() / np.sqrt(self.Snoise())
+        try:
+            Scorr = self.S_ / self.Snoise_
+        except AttributeError:
+            Scorr = self.S() / np.sqrt(self.Snoise())
+        self.Scorr_ = np.real(Scorr)
+        return np.real(Scorr)
 
     def Fs(self):
         '''Calculate flux based zeropoint of S'''
@@ -172,12 +176,14 @@ class OptimalSubtraction:
         sn, sr = self.sn, self.sr
         Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
         Fs = np.sum(beta ** 2 * abs(Pn_hat) * abs(Pr_hat) / Den)
+        self.Fs_ = Fs
         return Fs
 
     def Fd(self):
         '''Calculate the flux based zero point of D'''
         self.CheckGainMatched()
         Fd = self.beta / np.sqrt(self.sn**2 + self.sr**2*self.beta**2)
+        self.Fd_ = np.real(Fd)
         return np.real(Fd)
 
     def Pd(self):
@@ -188,6 +194,8 @@ class OptimalSubtraction:
         SqrtDen = np.sqrt(Den)
         Pd_hat = self.beta * Pr_hat * Pn_hat / (self.Fd() * SqrtDen)
         Pd = np.fft.ifft2(Pd_hat)
+        self.Pd_ = Pd
+
         return np.real(Pd)
 
     def CheckGainMatched(self):
@@ -381,15 +389,18 @@ def ListToArray(List, shape):
     parMatrixFull = scipy.misc.imresize(parMatrix, shape, interp = 'nearest')
     return parMatrixFull
 
+def gamma(beta, gammaPrime, sn, sr):
+    return gammaPrime * np.sqrt(sn ** 2 + beta ** 2 * sr ** 2)
+
 def IterativeSolve(N, R, Pn, Pr, sn, sr):
     '''Solve for linear fit iteratively'''
 
-    BetaTolerance = 1e-5
-    GammaTolerance = 1e-5
+    BetaTolerance = 1e-10
+    GammaPrimeTolerance = 1e-10
     beta = 1.
-    gamma = 0.
+    gammaPrime = 0.
     beta0 = 10e5
-    gamma0 = 10e5
+    gammaPrime0 = 10e5
     i = 0
     MaxIteration = 5
 
@@ -398,7 +409,7 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
     Pr_hat = np.fft.fft2(Pr)
     Pn_hat = np.fft.fft2(Pn)
 
-    while abs(beta - beta0) > BetaTolerance or abs(gamma - gamma0) > GammaTolerance:
+    while abs(beta - beta0) > BetaTolerance or abs(gammaPrime - gammaPrime0) > GammaPrimeTolerance:
 
         SqrtDen = np.sqrt(sn ** 2 * abs(Pr_hat) ** 2 + beta ** 2 * sr ** 2 * abs(Pn_hat) ** 2)
         Dn_hat = Pr_hat * N_hat / SqrtDen
@@ -408,7 +419,7 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
         DnFlatten = Dn.flatten()
         DrFlatten = Dr.flatten()
 
-        beta0, gamma0 = beta, gamma
+        beta0, gammaPrime0 = beta, gammaPrime
 
         x = sm.add_constant(DrFlatten)#[index])
         y = DnFlatten#[index]
@@ -417,22 +428,22 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
         Parameters = RobustFit.params
         Errors = RobustFit.bse
         beta = Parameters[1]
-        gamma = Parameters[0]
+        gammaPrime = Parameters[0]
         betaError = Errors[1]
-        gammaError = Errors[0]
+        gammaPrimeError = Errors[0]
 
         if i == MaxIteration: break
         i += 1
-        #print 'Iteration {}:'.format(i)
-        #print 'Beta = {0}, gamma = {1}'.format(beta, gamma * np.sqrt(sn**2 + beta ** 2 *sr**2))
+        print 'Iteration {}:'.format(i)
+        print 'Beta = {0}, gamma = {1}'.format(beta, gamma(beta, gammaPrime, sn, sr))
 
     print 'Fit done in {} iterations'.format(i)
 
     #plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, RobustFit.fittedvalues, 'r-')
     #plt.show()
     print 'Beta = ' + str(beta)
-    print 'Gamma = ' + str(gamma * np.sqrt(sn**2 + beta ** 2 *sr**2))
-    return beta, gamma, betaError, gammaError
+    print 'Gamma = ' + str(gamma(beta, gammaPrime, sn, sr))
+    return beta, gamma(beta, gammaPrime, sn, sr), betaError, gammaPrimeError
 
 
 if __name__ == '__main__':
