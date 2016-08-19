@@ -29,7 +29,9 @@ from sourcesub import print_and_run_command
 def query_for_files(conn, args):
     query ='SELECT * FROM photlco AS p LEFT JOIN photlcoraw AS pr '
     query += 'ON p.filename = pr.filename '
-    query += 'WHERE p.filename LIKE "%e91%" AND p.z1 != 9999 AND p.filetype = 1 '
+    query += 'WHERE p.filename LIKE "%e91%" '
+    query += 'AND (p.z1 != 9999 or p.z2 != 9999)'
+    query += 'AND p.filetype = 1 '
 
     if '-' not in str(args.epoch):
         query += ' AND p.dayobs = {0} '.format(args.epoch)
@@ -61,12 +63,14 @@ def choosemagnitude(_magnitde=None):
 
 
 def comparefakemag(ofilep, magnitude):
+    # Compare the magnitude in the header of a file, versus the input magnitude
     hdulist1 = pyfits.open(ofilep)
     header1 = hdulist1[0].header
     return(header1['FAKEMAG'] == magnitude)
 
 
 def findzeropoint(row):
+    # Find the column that has gr as a filter, and use that zeropoint
     if row['zcol1'] == "gr":
         zeropoint = row['z1']
     elif row['zcol2'] == "gr":
@@ -78,6 +82,7 @@ def findzeropoint(row):
 
 
 def get_ra_and_dec(row, args):
+    # Pick argument over header, then convert into sexagesmial
     if args.ras != None:
         ra = args.ras
     else:
@@ -98,6 +103,7 @@ def get_ra_and_dec(row, args):
 
 
 def get_parameters(row, args):
+    # Get parameters for source_drop
     sexa_ra, sexa_dec = get_ra_and_dec(row, args)
     zeropoint = findzeropoint(row)
     airmass = row['airmass']
@@ -106,6 +112,7 @@ def get_parameters(row, args):
 
 
 def sexa2deg(ra,dec):
+    # Convert sexagesimal to degree
     ra = Angle(ra, u.hour).degree
     dec = Angle(dec, u.degree).degree
     return ra, dec
@@ -116,13 +123,13 @@ def createpsf(shape,xpos,ypos,ifilep):
 
     ifileppsf = ifilep.replace(".fits",".psf.fits")
     iraf.noao.digiphot.daophot.seepsf(ifileppsf,"e93.psf.fits")
-    blankarray = np.zeros(shape,dtype=float)
     HDU = pyfits.open("e93.psf.fits")
-
     residualdata = HDU[0].data
     residualshape = residualdata.shape
+
     ystart = int(ypos - residualshape[0]/2)
     xstart = int(xpos - residualshape[1]/2)
+    blankarray = np.zeros(shape, dtype=float)
     blankarray[ystart:ystart+residualshape[0],xstart:xstart+residualshape[1]] = residualdata
     psf = blankarray
 
@@ -134,6 +141,7 @@ def createpsf(shape,xpos,ypos,ifilep):
 
 
 def degs2coords(ra,dec,header):
+    # Converts RA and DEC into coordinates on image
     w = wcs.WCS(header)
     return w.all_world2pix(ra,dec,0)
 
@@ -198,7 +206,7 @@ def ingest_into_photlco(row):
 ##############################################################################
 description='Creates e93 files where e93 files have an inserted psf based'\
             'off of the e91 file.'
-usage='%(prog)s -e epoch [-f filename -m magnitude]'
+usage='%(prog)s -e epoch [-f filestr -m magnitude]'
 
 if __name__ == "__main__":	
     from argparse import ArgumentParser
@@ -231,12 +239,14 @@ if __name__ == "__main__":
         sys.argv.append('--help')
         args = parser.parse_args()
 
-
+    # Connect to db and get files to put sources into
     hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
     conn = lsc.mysqldef.dbConnect(hostname, username, passwd, database)
     resultSet = query_for_files(conn, args)
 
+    # Iterate through each file
     for row in resultSet:
+        # Edit filenames
         ifile = row['filename']
         ofile = ifile.replace('e91', 'e93')
         if _ras != None or _decs != None:
@@ -246,8 +256,9 @@ if __name__ == "__main__":
         ofilep = filepath + ofile
         print '#' * 75, '\n', ifile
 
-        magnitude = choosemagnitude(args.magnitude)
+        magnitude = choosemagnitude(_magnitude)
 
+        # Check to see if you don't need to create a new image file, else drop and ingest
         preexistrow = lsc.mysqldef.getlistfromraw(conn,'photlco','filename',ofile)
         if preexistrow and _force == False and comparefakemag(ofilep, magnitude) == True:
             print ofile, "already created with magnitude of", magnitude

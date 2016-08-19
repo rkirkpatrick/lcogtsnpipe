@@ -131,7 +131,7 @@ def query_for_previous_templates(db, row, _tempdate='',_temptel='fl'):
     if _temptel != '':
         query += '''AND instrument LIKE '%{}%' '''.format(_temptel)
     query += '''ORDER BY dateobs, ut LIMIT 1 '''
-    print query
+
     fileinfo = lsc.mysqldef.sqlquery(db, query)
     return fileinfo
 
@@ -334,7 +334,6 @@ if __name__ == "__main__":
         query = query_photlco_for_targets()
 
     query = add_arguments_to_query(query, _epoch, _name)
-    print query
     objects = lsc.mysqldef.sqlquery(db, query)
 
 

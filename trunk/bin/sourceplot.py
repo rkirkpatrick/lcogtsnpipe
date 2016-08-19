@@ -97,6 +97,8 @@ def updateoutliers(resultSet,_magnitude):
 
 
 def make_xy_sets(resultSet):
+    # Put all inmags into x, and all diffmags into y. The same index will
+    # correspond to the same row.
     x = []
     y = []
     for row in resultSet:
@@ -109,7 +111,8 @@ def make_xy_sets(resultSet):
 
 
 def create_datasets_for_inmag(_magnitude, xset, yset):
-    # Create list of numpy arrays. Each numpy array should have all data for some inmag, sorted ascending
+    # Create list of numpy arrays. Each numpy array should have all data for some inmag.
+    # The numpy arrays will be sorted in ascending order
     dataset = []
     for magindex, inmag in enumerate(_magnitude):
         dataset.append([])
@@ -155,13 +158,14 @@ def len2shape(pltlength):
 
 
 def shape2rc(shape):
+    # Convert the shape into row and col
     row = int(shape[0])
     col = int(shape[1])
     return row, col
 
 
-def make_boxplot_or_histogram(_graph, ax, data, mag, mean, stddev, _bestfit=False):
-    xlabel = "Input Mag: " + str(mag)
+def make_boxplot_or_histogram(_graph, ax, data, inmag):
+    xlabel = "Input Mag: " + str(inmag)
     ax.set_xlabel(xlabel)
 
     if _graph == "boxplot":
@@ -172,14 +176,10 @@ def make_boxplot_or_histogram(_graph, ax, data, mag, mean, stddev, _bestfit=Fals
     elif _graph == "histogram":
         n, bins, patches = ax.hist(data, bins=20)
         ax.set_ylabel("Number of data points in bin")
-
-        if _bestfit == True:
-            # [WIP]
-            y = mlab.normpdf(bins, mean, stddev)
-            ax.plot(bins, y, 'r--')
-
+        ax.axvline(inmag, color='red')
 
 def varstats(_magnitude, dataset):
+    # Returns mean and standard deviation for each inmag
     means = []
     stddevs = []
     for i in range(len(_magnitude)):
@@ -205,7 +205,7 @@ if __name__ == "__main__":
                         default=False, help="Display a y = x graph with scatter")
     parser.add_argument("-b","--bad", dest="bad", action="store_true",
                         default=False, help="include images with bad diffmag from plots")
-    parser.add_argument("-o","--keepout", dest="keepout", action="store_true",
+    parser.add_argument("-k","--keepout", dest="keepout", action="store_true",
                         default=False, help="Keep outliers in data")
     parser.add_argument("-u","--updateout", dest="updateout", action="store_true",
                         default=False, help="Update the outliers in the database")
@@ -244,6 +244,8 @@ if __name__ == "__main__":
     # If user wants a scatterplot
     if _graph == "scatter":
         plt.scatter(xset,yset)
+        plt.xlabel('Input Magnitudes')
+        plt.ylabel('Difference Magnitudes')
         # Create bestfit line in scatterplot
         if _bestfit == True:
             a = np.polyfit(xset,yset,1)
@@ -265,8 +267,6 @@ if __name__ == "__main__":
         fig, axes = plt.subplots(nrows=row, ncols=col, figsize=(12, 7))
         fig.tight_layout()
 
-        means, stddevs = varstats(_magnitude, dataset)
-
         ii = 0
         for i in range(row):
             if row == 1:
@@ -277,7 +277,7 @@ if __name__ == "__main__":
                 axis = axes[i]
             for ax in axis:
                 if ii < len(_magnitude):
-                    make_boxplot_or_histogram(_graph, ax, dataset[ii], _magnitude[ii], means[ii], stddevs[ii], _bestfit)
+                    make_boxplot_or_histogram(_graph, ax, dataset[ii], _magnitude[ii])
                     ii += 1
 
     # If user wants variable statistics for each inmag
