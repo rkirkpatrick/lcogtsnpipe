@@ -255,7 +255,6 @@ if __name__ == "__main__":
 
         query = 'SELECT filename FROM photlco WHERE objname = \'{0}\' AND dayobs = {1} AND filename NOT LIKE \'%e93%\' LIMIT 1'.format(_name, _epoch)
         cosmic_file = filepath + lsc.mysqldef.sqlquery(conn, query)[0]['filename'].replace('.fits', '.clean.fits')
-        print cosmic_file
         if not os.path.isfile(cosmic_file):
             os.system('lscloop.py -n {0} -e {1} -s cosmic'.format(_name, _epoch))
 

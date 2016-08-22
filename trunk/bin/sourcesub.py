@@ -210,11 +210,23 @@ def reduce_fake_source_image(dayobs, objname, inmag, filestr, fwhm, show, db):
     print_and_run_command(source_ingest_command)
 
     # Create psf for fakesource image
-    fake_source_command = create_loop_command(dayobs, objname, filestr=filestr)
-    perform_lscloop(fake_source_command, stage='psf', fwhm=fwhm, show=show)
+    #fake_source_command = create_loop_command(dayobs, objname, filestr=filestr)
+    #perform_lscloop(fake_source_command, stage='psf', fwhm=fwhm, show=show)
 
-    # Perform cosmic ray rejection on fakesource image
-    #perform_lscloop(fake_source_command, 'cosmic')
+    query = 'SELECT psf FROM photlco WHERE objname = \'{0}\' AND dayobs = {1} AND filename NOT LIKE \'%e93%\' LIMIT 1'.format(objname, dayobs)
+    psf_file = filepath + lsc.mysqldef.sqlquery(db, query)[0]['psf']
+    if not os.path.isfile(psf_file):
+        if 'e90' in psf_file:
+            diff_psf_file = psf_file.replace('e90', 'e93')
+            os.system('cp {0} {1}'.format(psf_file, diff_psf_file))
+        elif 'e91' in psf_file:
+            diff_psf_file = psf_file.replace('e91', 'e93')
+            os.system('cp {0} {1}'.format(psf_file, diff_psf_file))
+        else:
+            psf_command = create_loop_command(dayobs, objname, filestr = filestr)
+            perform_lscloop(psf_command, stage='psf', fwhm=fwhm, show=show)
+
+    os.system('cp {0} {1}'.format(diff_psf_file, psf_file))
 
 
 def get_new_diffmag(db, diffname):
