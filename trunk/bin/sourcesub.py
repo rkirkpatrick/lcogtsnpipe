@@ -204,7 +204,7 @@ def define_different_filestrs(tempname, suffix):
     return fake_img_filestr, differencing_filestr, post_subtraction_filestr
 
 
-def reduce_fake_source_image(dayobs, objname, inmag, filestr, fwhm, show):
+def reduce_fake_source_image(dayobs, objname, inmag, filestr, fwhm, show, db):
     # Create fake source image
     source_ingest_command = 'sourceingest.py --force -n ' + objname + ' -e ' + dayobs + ' -m ' + str(inmag)
     print_and_run_command(source_ingest_command)
@@ -214,7 +214,7 @@ def reduce_fake_source_image(dayobs, objname, inmag, filestr, fwhm, show):
     perform_lscloop(fake_source_command, stage='psf', fwhm=fwhm, show=show)
 
     # Perform cosmic ray rejection on fakesource image
-    perform_lscloop(fake_source_command, 'cosmic')
+    #perform_lscloop(fake_source_command, 'cosmic')
 
 
 def get_new_diffmag(db, diffname):
@@ -388,7 +388,7 @@ if __name__ == "__main__":
                 for inmag in mags_to_be_done:
                     print '''Injecting fake source of magnitude''', inmag
                     fakeimgobs, diffobs, postobs = define_different_filestrs(tempname, suffix)
-                    reduce_fake_source_image(dayobs, objname, inmag, fakeimgobs, fwhm, show)
+                    reduce_fake_source_image(dayobs, objname, inmag, fakeimgobs, fwhm, show, db)
 
                     # Run image subtraction
                     print '''Running difference imaging on fake image'''
