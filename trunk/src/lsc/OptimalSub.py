@@ -7,7 +7,6 @@ import time
 from os import system
 import argparse
 from lsc.lscastrodef import sextractor
-from lsc.lscastrodef import crossmatchxy
 import statsmodels.api as sm
 
 import matplotlib.pyplot as plt
@@ -16,25 +15,67 @@ class OptimalSubtraction:
     '''Implementation of proper image subtraction from Zackey, Ofek, Gal-Yam 2016
        see https://arxiv.org/abs/1601.02655 for details'''
 
+
     def __init__(self, Nf, Rf, Pnf, Prf, ArgsDict = {}):
-        '''Take filenames and turn them into arrays for input into other functions'''
+        '''Take filenames and turn them into arrays'''
 
         self.ArgsDict = ArgsDict
         self.Nf, self.Rf = Nf, Rf
         self.Pnf, self.Prf = Pnf, Prf
-        self.Pn = ExtractPSF(self.Pnf)
-        self.Pr = ExtractPSF(self.Prf)
+
+        self.CheckPSFfromIRAF()
+
         self.NBackground, self.RBackground, self.Pn, self.Pr = CropImages(fits.getdata(self.Nf), fits.getdata(self.Rf), self.Pn, self.Pr)
         self.sn = np.std(self.NBackground)
         self.sr = np.std(self.RBackground)
 
+        self.CheckGainMatched()
+
+    def CheckAligned(self):
+        try:
+            Align = self.ArgsDict['Align']
+            if Align:
+                self.RBackground = AlignImages()
+        except AttributeError:
+            Align = False
+
+    def CheckGainMatched(self):
+        '''Check if the gain matching parameters have been found'''
+
+        # if user hasn't supplied beta and gamma, fit them
+        try:
+            self.beta = self.ArgsDict['beta']
+            self.gamma = self.ArgsDict['gamma']
+        except KeyError:
+            print 'Gain matching not done; fitting manually'
+            #sources = np.array(sextractor(self.Nf)).transpose()
+            #source_index = np.argsort(sources[:, 4])
+            #source_sorted = sources[source_index]
+
+            # add support for local gain matching once fitting improves
+            self.beta, self.gamma = self.MatchGain()#catalog = source_sorted)
+
+
+    def CheckPSFfromIRAF(self):
+        '''Check if user specified IRAF psf or actual psf'''
+
+        try:
+            PSFfromIRAF = self.ArgsDict['PSFfromIRAF']
+            if PSFfromIRAF:
+                self.Pn = ExtractPSF(self.Pnf)
+                self.Pr = ExtractPSF(self.Prf)
+            else:
+                self.Pn = fits.getdata(self.Pnf)
+                self.Pr = fits.getdata(self.Prf)
+        except AttributeError:
+            self.Pn = fits.getdata(self.Pnf)
+            self.Pr = fits.getdata(self.Prf)
 
 
     def D(self, normalize = '', diagnostic = False):
         '''Calculate proper subtraction image and normalize to zero point of reference or target'''
 
         NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
-
 
         if diagnostic:
             print 'Saving Deconvolved images'
@@ -51,7 +92,6 @@ class OptimalSubtraction:
             hdu = fits.PrimaryHDU(DConvR)
             hdu.writeto('RDConvolve.fits', clobber = True)
 
-        self.CheckGainMatched()
 
         # calculate D
         R = np.copy(RBackground)
@@ -79,10 +119,92 @@ class OptimalSubtraction:
 
         return np.real(DNormalize)
 
+
+    def Fd(self):
+        '''Calculate the flux based zero point of D'''
+        Fd = self.beta / np.sqrt(self.sn**2 + self.sr**2*self.beta**2)
+        self.Fd_ = np.real(Fd)
+        return np.real(Fd)
+
+
+
+    def Flux(self):
+        '''Calculate transient Flux'''
+        try:
+            Flux = self.S_ / self.Fs_
+        except AttributeError:
+            Flux = self.S() / self.Fs()
+        self.Flux_ = Flux
+        return Flux
+
+
+    def Fs(self):
+        '''Calculate flux based zeropoint of S'''
+
+        beta = self.beta
+        Pr_hat = np.fft.fft2(self.Pr)
+        Pn_hat = np.fft.fft2(self.Pn)
+        sn, sr = self.sn, self.sr
+        Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
+        Fs = np.sum(beta ** 2 * abs(Pn_hat) * abs(Pr_hat) / Den)
+        self.Fs_ = Fs
+        return Fs
+
+    def MakeCatalog(self, SortBy = 'magnitude'):
+        '''Check for source catalog and make one if necessary'''
+        try:
+            cat = self.Catalog
+            return cat
+
+        except AttributeError:
+            if SortBy == 'x':
+                SortIndex = 0
+            elif SortBy == 'y':
+                SortIndex = 1
+            elif SortBy == 'fwhm':
+                SortIndex = 2
+            elif SortBy == 'flux':
+                SortIndex = 3
+            elif SortBy == 'magnitude':
+                SortIndex = 4
+            elif SortBy == 'flag':
+                SortIndex = 7
+            else:
+                SortIndex = 4
+
+            sources = np.array(sextractor(self.Nf)).transpose()
+            source_index = np.argsort(sources[:, SourceIndex])
+            source_sorted = sources[source_index]
+
+            self.Catalog = source_sorted
+            return source_sorted
+
+    def MatchGain(self, catalog = 'center'):
+        '''Call gain matching function'''
+        NSat = GetSaturationCount(self.Nf)
+        RSat = GetSaturationCount(self.Rf)
+        beta, gamma, betaError, gammaError = FitB(self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr, 
+                                                  catalog = catalog, NSaturation = NSat, RSaturation = RSat) # change to include catalog later
+        return beta, gamma
+
+
+    def Pd(self):
+        '''Calculate PSF of D'''
+
+        Pn_hat = np.fft.fft2(self.Pn)
+        Pr_hat = np.fft.fft2(self.Pr)
+        Den = self.sr ** 2 * self.beta ** 2 * abs(Pn_hat) ** 2 + self.sn ** 2 * abs(Pr_hat) ** 2
+        SqrtDen = np.sqrt(Den)
+        Pd_hat = self.beta * Pr_hat * Pn_hat / (self.Fd() * SqrtDen)
+        Pd = np.fft.ifft2(Pd_hat)
+        self.Pd_ = np.real(Pd)
+
+        return np.real(Pd)
+
+
     def S(self):
         '''Calculate S array'''
 
-        self.CheckGainMatched()
         try:
             S_hat = self.Fd_ * np.fft.fft2(self.D_) * np.conj(np.fft.fft2(self.Pd_))
             S = np.fft.ifft2(S_hat)
@@ -92,21 +214,40 @@ class OptimalSubtraction:
         self.S_ = np.real(S)
         return np.real(S)
 
-    def Flux(self):
-        '''Calculate transient Flux'''
-        self.CheckGainMatched()
+    def SaveDToDB(self, Df, normalize):
+        '''Calculate and save proper subtraction image to database'''
+        self.Df = Df
+        self.D(normalize)
+        hdu = fits.PrimaryHDU(np.real(self.D_))
+        hdu.header = fits.getheader(self.Nf)
+        hdu.header['PHOTNORM'] = normalize
+        hdu.header['BETA'] = self.beta
+        hdu.header['GAMMA'] = self.gamma
+        hdu.writeto(self.Df, clobber = True)
+
+    def SaveImageToWD(self):
+        '''Save various images to working directory (testing only)'''
+        Images = {'S.fits': self.S, 'Snoise.fits': self.Snoise, 'Scorr.fits': self.Scorr, 'D.fits': self.D, 'Flux.fits': self.Flux, 'Pd.fits': self.Pd}
+
+        for element in Images:
+            hdu = fits.PrimaryHDU(np.real(Images[element]))
+            hdu.header=fits.getheader(self.Nf)
+            hdu.writeto(element, clobber = True)
+
+
+    def Scorr(self):
+        '''Calculate Scorr'''
         try:
-            Flux = self.S_ / self.Fs_
+            Scorr = self.S_ / self.Snoise_
         except AttributeError:
-            Flux = self.S() / self.Fs()
-        self.Flux_ = Flux
-        return Flux
+            Scorr = self.S() / np.sqrt(self.Snoise())
+        self.Scorr_ = np.real(Scorr)
+        return np.real(Scorr)
 
 
     def Snoise(self):
         '''Calculate the noise image for Scorr'''
         # this whole function needs optimization
-        self.CheckGainMatched()
 
         NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
         R = np.copy(RBackground)
@@ -158,105 +299,33 @@ class OptimalSubtraction:
         return np.real(Snoise)
 
 
-    def Scorr(self):
-        '''Calculate Scorr'''
-        try:
-            Scorr = self.S_ / self.Snoise_
-        except AttributeError:
-            Scorr = self.S() / np.sqrt(self.Snoise())
-        self.Scorr_ = np.real(Scorr)
-        return np.real(Scorr)
 
-    def Fs(self):
-        '''Calculate flux based zeropoint of S'''
-        self.CheckGainMatched()
-        beta = self.beta
-        Pr_hat = np.fft.fft2(self.Pr)
-        Pn_hat = np.fft.fft2(self.Pn)
-        sn, sr = self.sn, self.sr
-        Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
-        Fs = np.sum(beta ** 2 * abs(Pn_hat) * abs(Pr_hat) / Den)
-        self.Fs_ = Fs
-        return Fs
-
-    def Fd(self):
-        '''Calculate the flux based zero point of D'''
-        self.CheckGainMatched()
-        Fd = self.beta / np.sqrt(self.sn**2 + self.sr**2*self.beta**2)
-        self.Fd_ = np.real(Fd)
-        return np.real(Fd)
-
-    def Pd(self):
-        self.CheckGainMatched()
-        Pn_hat = np.fft.fft2(self.Pn)
-        Pr_hat = np.fft.fft2(self.Pr)
-        Den = self.sr ** 2 * self.beta ** 2 * abs(Pn_hat) ** 2 + self.sn ** 2 * abs(Pr_hat) ** 2
-        SqrtDen = np.sqrt(Den)
-        Pd_hat = self.beta * Pr_hat * Pn_hat / (self.Fd() * SqrtDen)
-        Pd = np.fft.ifft2(Pd_hat)
-        self.Pd_ = Pd
-
-        return np.real(Pd)
-
-    def CheckGainMatched(self):
-        '''Check if the gain matching parameters have been found'''
-
-        # if user hasn't supplied beta and gamma, fit them
-        try:
-            self.beta
-            self.gamma
-        except AttributeError:
-            try:
-                self.beta = self.ArgsDict['beta']
-                self.gamma = self.ArgsDict['gamma']
-            except KeyError:
-                print 'Gain matching not done; fitting manually'
-                #sources = np.array(sextractor(self.Nf)).transpose()
-                #source_index = np.argsort(sources[:, 4])
-                #source_sorted = sources[source_index]
-
-                # add support for local gain matching once fitting improves
-                self.beta, self.gamma = self.MatchGain()#catalog = source_sorted)
-
-
-
-    def SaveDToDB(self, Df, normalize):
-        '''Calculate and save proper subtraction image to database'''
-        self.Df = Df
-        self.DNormalize = self.D(normalize)
-        hdu = fits.PrimaryHDU(np.real(self.DNormalize))
-        hdu.header=fits.getheader(self.Nf)
-        hdu.header['PHOTNORM'] = normalize
-        hdu.writeto(self.Df, clobber = True)
-
-    def MatchGain(self, catalog = 'center'):
-        '''Call gain matching function'''
-        beta, gamma, betaError, gammaError = FitB(self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr, catalog = catalog) # change to include catalog later
-        return beta, gamma
-
-    def SaveImageToWD(self):
-        '''Save various images to working directory (testing only)'''
-        Images = {'S.fits': self.S, 'Snoise.fits': self.Snoise, 'Scorr.fits': self.Scorr, 'D.fits': self.D, 'Flux.fits': self.Flux, 'Pd.fits': self.Pd}
-
-        for element in Images:
-            hdu = fits.PrimaryHDU(np.real(Images[element]))
-            hdu.header=fits.getheader(self.Nf)
-            hdu.writeto(element, clobber = True)
 
 
 def AlignPSF(PSF, Coords):
     '''Roll PSF to correct for registration errors'''
     PSF = scipy.ndimage.interpolation.shift(PSF, Coords)
     return PSF
-    
 
-def RemoveSaturatedFromCatalog(catalog):
-    '''Remove stars with saturated pixels from catalog'''
 
-    SafeIndex = np.where(catalog[:7].flatten() == 0)
-    SafeSource = catalog[SafeIndex]
-    return SafeSource
-        
+def CropImages(N, R, Pn, Pr):
+    '''Open and crop images and PSFs to the same size'''
+
+    if N.shape[0] <= R.shape[0] & N.shape[1] <= R.shape[1]:
+        s = N.shape
+    elif N.shape[0] > R.shape[0] & N.shape[1] > R.shape[1]:
+        s = R.shape
+    else:
+        s = [np.min([N.shape[0], R.shape[0]]), np.min([N.shape[1], R.shape[1]])]
+
+    N = N[:s[0], :s[1]]
+    R = R[:s[0], :s[1]]
+
+    Pn_extended = PadPSF(Pn, N.shape)
+    Pr_extended = PadPSF(Pr, N.shape)
+
+    return N, R, Normalize(Pn_extended), Normalize(Pr_extended)
+
 
 def GetSaturationCount(filename):
     '''Get pixel saturation count for a given image'''
@@ -290,47 +359,14 @@ def ExtractPSF(Pf):
     PSF = fits.open('temp.psf.fits')[0].data
     system('rm temp.psf.fits')
 
-    # normalize PSF
-    PSF=PSF / np.sum(PSF)
-
     return PSF
 
-def CropImages(N, R, Pn, Pr):
-    '''Open and crop images and PSFs to the same size'''
 
-    if N.shape[0] <= R.shape[0] & N.shape[1] <= R.shape[1]:
-        s = N.shape
-    elif N.shape[0] > R.shape[0] & N.shape[1] > R.shape[1]:
-        s = R.shape
-    else:
-        s = [np.min([N.shape[0], R.shape[0]]), np.min([N.shape[1], R.shape[1]])]
-
-    N = N[:s[0], :s[1]]
-    R = R[:s[0], :s[1]]
-
-    Pn_extended = PadPSF(Pn, N.shape)
-    Pr_extended = PadPSF(Pr, N.shape)
-
-    return N, R, Pn_extended, Pr_extended
-
-def PadPSF(PSF, shape):
-    '''Pad PSF and center at (0,0)'''
-
-    p = PSF.shape
-    s = shape
-    PSF_extended = np.zeros(s)
-    PSF_extended[s[0] / 2 - p[0] / 2 - 1:s[0] / 2 + p[0] / 2, s[1] / 2 - p[1] / 2 - 1:s[1] / 2 + p[1] / 2] = PSF
-    PSF_extended = np.roll(PSF_extended, s[0] / 2, 0)
-    PSF_extended = np.roll(PSF_extended, s[1] / 2, 1)
-
-    return PSF_extended
-
-
-def FitB(NBackground, RBackground, Pn, Pr, sn, sr, catalog = 'center'):
+def FitB(NBackground, RBackground, Pn, Pr, sn, sr, catalog = 'center', NSaturation = None, RSaturation = None):
     '''Fit gain matching (beta) and background (gamma) parameters'''
 
     if catalog is 'center':
-        center, d = NBackground.shape[0] / 2, 2000
+        center, d = NBackground.shape[0] / 2, 750
         a, b = center - d, center + d
         coords = [[a, b, a, b]]
 
@@ -361,7 +397,7 @@ def FitB(NBackground, RBackground, Pn, Pr, sn, sr, catalog = 'center'):
 
         print 'x: {0}, y: {1}'.format(star[0] + d, star[2] + d)
         # iteratively solve for linear fit of beta and gamma
-        beta, gamma, betaError, gammaError = IterativeSolve(N, R, Pn, Pr, sn, sr)
+        beta, gamma, betaError, gammaError = IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
         if catalog == 'grid':
             g.append(gamma)
             b.append(beta)
@@ -382,21 +418,23 @@ def FitB(NBackground, RBackground, Pn, Pr, sn, sr, catalog = 'center'):
     else:
         return np.mean(beta), np.mean(gamma), np.mean(betaError), np.mean(gammaError)
 
-def ListToArray(List, shape):
-    '''Take a list and turn it into an interpolated array'''
-    resolution = int(np.sqrt(len(List)))
-    parMatrix = np.array(List).reshape(2 * [resolution]).transpose()
-    parMatrixFull = scipy.misc.imresize(parMatrix, shape, interp = 'nearest')
-    return parMatrixFull
 
 def gamma(beta, gammaPrime, sn, sr):
     return gammaPrime * np.sqrt(sn ** 2 + beta ** 2 * sr ** 2)
 
-def IterativeSolve(N, R, Pn, Pr, sn, sr):
+
+def InterpolateSaturatedStars(image, psf, catalog):
+    '''Take saturated stars and interpolate based on psf'''
+    # figure this out later...
+    scipy.signal.correlate2d(image, psf)
+    return None
+
+
+def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None):
     '''Solve for linear fit iteratively'''
 
-    BetaTolerance = 1e-10
-    GammaPrimeTolerance = 1e-10
+    BetaTolerance = 1e-5
+    GammaPrimeTolerance = 1e-5
     beta = 1.
     gammaPrime = 0.
     beta0 = 10e5
@@ -412,6 +450,7 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
     while abs(beta - beta0) > BetaTolerance or abs(gammaPrime - gammaPrime0) > GammaPrimeTolerance:
 
         SqrtDen = np.sqrt(sn ** 2 * abs(Pr_hat) ** 2 + beta ** 2 * sr ** 2 * abs(Pn_hat) ** 2)
+        ScalarDen = np.sqrt(sn ** 2 + beta ** 2 * sr ** 2)
         Dn_hat = Pr_hat * N_hat / SqrtDen
         Dr_hat = Pn_hat * R_hat / SqrtDen
         Dn = np.real(np.fft.ifft2(Dn_hat))
@@ -419,12 +458,19 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
         DnFlatten = Dn.flatten()
         DrFlatten = Dr.flatten()
 
+        # remove saturated pixels
+        DnIndex = np.where(DnFlatten < NSaturation / ScalarDen)
+        DrIndex = np.where(DrFlatten < RSaturation / ScalarDen)
+        GoodPixInCommon = np.intersect1d(DnIndex, DrIndex)
+        DnFlatten = DnFlatten[GoodPixInCommon]
+        DrFlatten = DrFlatten[GoodPixInCommon]
+
         beta0, gammaPrime0 = beta, gammaPrime
 
         x = sm.add_constant(DrFlatten)#[index])
         y = DnFlatten#[index]
 
-        RobustFit = sm.OLS(y,x).fit()#RLM(y, x).fit()
+        RobustFit = sm.RLM(y, x).fit()
         Parameters = RobustFit.params
         Errors = RobustFit.bse
         beta = Parameters[1]
@@ -444,6 +490,41 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr):
     print 'Beta = ' + str(beta)
     print 'Gamma = ' + str(gamma(beta, gammaPrime, sn, sr))
     return beta, gamma(beta, gammaPrime, sn, sr), betaError, gammaPrimeError
+
+
+def ListToArray(List, shape):
+    '''Take a list and turn it into an interpolated array'''
+    resolution = int(np.sqrt(len(List)))
+    parMatrix = np.array(List).reshape(2 * [resolution]).transpose()
+    parMatrixFull = scipy.misc.imresize(parMatrix, shape, interp = 'nearest')
+    return parMatrixFull
+
+
+def Normalize(Image):
+    return Image / np.sum(Image)
+
+
+def PadPSF(PSF, shape):
+    '''Pad PSF and center at (0,0)'''
+
+    p = PSF.shape
+    s = shape
+    PSF_extended = np.zeros(s)
+    PSF_extended[s[0] / 2 - p[0] / 2 - 1:s[0] / 2 + p[0] / 2, s[1] / 2 - p[1] / 2 - 1:s[1] / 2 + p[1] / 2] = PSF
+    PSF_extended = np.roll(PSF_extended, s[0] / 2, 0)
+    PSF_extended = np.roll(PSF_extended, s[1] / 2, 1)
+
+    return PSF_extended
+
+
+def RemoveSaturatedFromCatalog(catalog):
+    '''Remove stars with saturated pixels from catalog'''
+
+    SafeIndex = np.where(catalog[:7].flatten() == 0)
+    SafeSource = catalog[SafeIndex]
+    return SafeSource
+
+
 
 
 if __name__ == '__main__':

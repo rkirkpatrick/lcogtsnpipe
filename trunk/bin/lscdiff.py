@@ -204,9 +204,6 @@ if __name__ == "__main__":
                                             fitgeom="general", functio="legendre", xxor=num, xyor=num, xxterms="half",
                                             yxor=num, yyor=num, yxterms="half", calctype="real", inter='No')
 
-                        iraf.immatch.geomap('tmpcoo', "transform", 1, hdtar['NAXIS1'], 1, hdtar['NAXIS2'],
-                                            fitgeom="general", functio="legendre", xxor=num, xyor=num, xxterms="half",
-                                            yxor=num, yyor=num, yxterms="half", calctype="real", inter='No')
 
                         imgtemp = '_temp.fits'
                         imgtarg = '_targ.fits'
@@ -359,7 +356,9 @@ if __name__ == "__main__":
                         if _optimal:                            
                             psftarg = imgtarg_path.replace('.fits','.psf.fits')
                             psftemp = imgtemp_path.replace('.fits','.psf.fits')
-                            d = {'nVariance': 'targnoise.fits', 'rVariance': 'tempnoise.fits'}
+
+                            d = {'Align': False, 'PSFfromIRAF': True} # can add args as features are added to OptimalSub.py
+
                             OptimalSubtraction(imgtarg, imgtemp, psftarg, psftemp, ArgsDict = d).SaveDToDB(imgout, normalize)
                             # create fields that hotpants does
                             hotpants_fields = {'TARGET': (imgtarg_path, 'target image'),

@@ -163,7 +163,7 @@ def source_drop(ifilep, ofilep, magnitude, row, args):
     to describe the magnitude of the dropped source. If there is no
     magnitude, the 'FAKEMAG' header will be set as an empty string.
     """
-    HDU = pyfits.open(ifilep.replace('.fits', '.clean.fits'))
+    HDU = pyfits.open(ifilep)
     inimage = HDU[0].data
     hdr = HDU[0].header
     shape = inimage.shape
@@ -252,12 +252,6 @@ if __name__ == "__main__":
         if _ras != None or _decs != None:
             ofile = ofile.replace('.fits','.moved.fits')
         filepath = row['filepath']
-
-        query = 'SELECT filename FROM photlco WHERE objname = \'{0}\' AND dayobs = {1} AND filename NOT LIKE \'%e93%\' LIMIT 1'.format(_name, _epoch)
-        cosmic_file = filepath + lsc.mysqldef.sqlquery(conn, query)[0]['filename'].replace('.fits', '.clean.fits')
-        if not os.path.isfile(cosmic_file):
-            os.system('lscloop.py -n {0} -e {1} -s cosmic'.format(_name, _epoch))
-
         ifilep = filepath + ifile
         ofilep = filepath + ofile
         print '#' * 75, '\n', ifile
