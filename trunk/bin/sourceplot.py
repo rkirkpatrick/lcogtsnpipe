@@ -28,7 +28,7 @@ def create_magcomparison_query(args):
     if args.bad is False:
         query += ' AND diffmag != 9999 '
 
-    query = lsc.mysqldef.querylike(query, likelist=args.filestr)
+    query = lsc.mysqldef.querylike(query, likelist=[args.filestr])
 
     if args.magnitude != []:
         query += ' AND ( inmag = {0} '.format(args.magnitude[0])
@@ -36,11 +36,10 @@ def create_magcomparison_query(args):
             for i in range(1, len(args.magnitude)):
                 query += ' OR inmag = {0} '.format(args.magnitude[i])
         query += ") "
-
     return query
 
 
-def produce_result_set(args, _keepout=True):
+def produce_result_set(args):
     # Connect to database, and query the db
     try:
         hostname,username, passwd, database = lsc.mysqldef.getconnection('lcogt2')
@@ -49,9 +48,8 @@ def produce_result_set(args, _keepout=True):
         print 'Error: Could not connect to database'
 
     query = create_magcomparison_query(args)
-    if _keepout is False:
+    if args.keepout is False:
         query += "AND outlier = FALSE"
-
     resultSet = lsc.mysqldef.sqlquery(db,query)
 
     return resultSet
@@ -211,6 +209,9 @@ if __name__ == "__main__":
                         default=False, help="Update the outliers in the database")
     parser.add_argument("--filestr",nargs="+",type=str,dest="filestr", default=[],
                         help='Enter part(s) of the filename you want to search for')
+    parser.add_argument("--compare", dest="compare", action="store_true",
+                        default=False, help="Compare optimal and hotpants subtraction; only for sdss")
+
 
     args = parser.parse_args()
     _name = args.name
@@ -223,6 +224,10 @@ if __name__ == "__main__":
     _keepout = args.keepout
     _updateout = args.updateout
     _filestr = args.filestr
+    _compare = args.compare
+
+
+        
 
     resultSet = produce_result_set(args)
 
@@ -233,16 +238,57 @@ if __name__ == "__main__":
     if _updateout is True:
         updateoutliers(resultSet, _magnitude)
 
-    if _keepout is False:
-        del resultSet
-        resultSet = produce_result_set(args, _keepout=_keepout)
+    #if _keepout is False:
+    #    del resultSet
+    #    resultSet = produce_result_set(args, _keepout=_keepout)
 
     # Set x(inmag) data and y(diffmag) data as ndarrays
     xset, yset = make_xy_sets(resultSet)
     dataset = create_datasets_for_inmag(_magnitude, xset, yset)
 
+    if _compare is True:
+        args.filestr = 'optimal'
+        resultSetOptimal = produce_result_set(args)
+        xsetOptimal, ysetOptimal = make_xy_sets(resultSetOptimal)
+
+        args.filestr = 'sdss.diff'
+        resultSetHotpants = produce_result_set(args)
+        xsetHotpants, ysetHotpants = make_xy_sets(resultSetHotpants)
+
+        if len(xsetOptimal) != 0:
+            plt.scatter(xsetOptimal, ysetOptimal, color="blue", label="Optimal Subtractions")
+        if len(xsetHotpants) != 0:
+            plt.scatter(xsetHotpants, ysetHotpants, color="red", label="Hotpants Subtractions")
+        plt.xlabel('Input Magnitudes')
+        plt.ylabel('Difference Magnitudes')
+
+        if _bestfit is True:
+            if len(xsetOptimal) != 0:
+                paramsOptimal = np.polyfit(xsetOptimal,ysetOptimal,1)
+                plt.plot(xsetOptimal, np.polyval(paramsOptimal, xsetOptimal),color="blue",label="Best Fit Optimal")
+                print "Best fit line data for Optimal:"
+                print "Slope =", str(paramsOptimal[0]) + ",", "y-int =", paramsOptimal[1]
+            if len(xsetHotpants) != 0:
+                paramsHotpants = np.polyfit(xsetHotpants,ysetHotpants,1)
+                plt.plot(xsetHotpants, np.polyval(paramsHotpants, xsetHotpants),color="red",label="Best Fit Hotpants")
+                print "Best fit line data for Hotpants:"
+                print "Slope =", str(paramsHotpants[0]) + ",", "y-int =", paramsHotpants[1]
+            plt.legend(loc="upper left")
+            if len(xsetOptimal) != 0 and len(xsetHotpants) != 0:
+                plt.annotate(xy = (18,15),s = "Params: slope, y-intercept \nOptimal: {0}, {1} \nHotpants {2}, {3}".format(round(paramsOptimal[0],2), 
+                                                                                                                          round(paramsOptimal[1],2), 
+                                                                                                                          round(paramsHotpants[0],2), 
+                                                                                                                          round(paramsHotpants[1],2)))
+            elif len(xsetOptimal) == 0 and len(xsetHotpants) != 0:
+                plt.annotate(xy = (18,15),s = "Params: slope, y-intercept\nHotpants {0}, {1}".format(round(paramsHotpants[0],2), 
+                                                                                                     round(paramsHotpants[1],2)))
+            elif len(xsetOptimal) == 0 and len(xsetHotpants) != 0:
+                plt.annotate(xy = (18,15),s = "Params: slope, y-intercept\nHotpants {0}, {1}".format(round(paramsOptimal[0],2), 
+                                                                                                     round(paramsOptimal[1],2)))
+            plt.show()
+
     # If user wants a scatterplot
-    if _graph == "scatter":
+    elif _graph == "scatter":
         plt.scatter(xset,yset)
         plt.xlabel('Input Magnitudes')
         plt.ylabel('Difference Magnitudes')
@@ -259,6 +305,8 @@ if __name__ == "__main__":
         # Create legend
         if _bestfit or _yx:
             plt.legend(loc="upper left")
+
+
 
     # If user wants a boxplot or histogram
     elif _graph in ['boxplot','histogram']:
