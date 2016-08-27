@@ -9,6 +9,7 @@ import argparse
 from lsc.lscastrodef import sextractor
 import statsmodels.api as sm
 
+
 import matplotlib.pyplot as plt
 
 class OptimalSubtraction:
