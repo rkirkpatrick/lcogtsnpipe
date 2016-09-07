@@ -357,9 +357,9 @@ if __name__ == "__main__":
                             psftarg = imgtarg_path.replace('.fits','.psf.fits')
                             psftemp = imgtemp_path.replace('.fits','.psf.fits')
 
-                            d = {'Align': False, 'PSFfromIRAF': True} # can add args as features are added to OptimalSub.py
+                            d = {'Align': False, 'PSFfromIRAF': True, 'NewPSF': psftarg, 'RefPSF': psftemp} # can add args as features are added to OptimalSub.py
 
-                            OptimalSubtraction(imgtarg, imgtemp, psftarg, psftemp, ArgsDict = d).SaveDToDB(imgout, normalize)
+                            OptimalSubtraction(imgtarg, imgtemp, ArgsDict = d).SaveD(imgout, normalize)
                             # create fields that hotpants does
                             hotpants_fields = {'TARGET': (imgtarg_path, 'target image'),
                                                'TEMPLATE': (imgtemp_path, 'template image'),

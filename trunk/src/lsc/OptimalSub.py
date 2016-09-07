@@ -16,45 +16,107 @@ class OptimalSubtraction:
        see https://arxiv.org/abs/1601.02655 for details'''
 
 
-    def __init__(self, Nf, Rf, Pnf, Prf, ArgsDict = {}):
-        '''Take filenames and turn them into arrays'''
+    def __init__(self, Nf, Rf, ArgsDict = {}):
+        '''Take filenames and turn them into arrays and unpack arguments in ArgsDict'''
 
         self.ArgsDict = ArgsDict
         self.Nf, self.Rf = Nf, Rf
-        self.Pnf, self.Prf = Pnf, Prf
+        self.MakeDefaults()
+
+        self.NBackground = fits.getdata(self.ArgsDict['NewBackground'])
+        self.RBackground = fits.getdata(self.ArgsDict['RefBackground'])
+        self.Nf, self.Rf = Nf, Rf
+        self.CheckPSFsExist()
 
         self.CheckPSFfromIRAF()
+        self.CheckAlign()
 
-        self.NBackground, self.RBackground, self.Pn, self.Pr = CropImages(fits.getdata(self.Nf), fits.getdata(self.Rf), self.Pn, self.Pr)
-        self.sn = np.std(self.NBackground)
-        self.sr = np.std(self.RBackground)
+        self.N, self.R, self.Pn, self.Pr = CropImages(fits.getdata(self.Nf), fits.getdata(self.Rf), self.Pn, self.Pr)
+
+        self.sn = np.std(self.N)
+        self.sr = np.std(self.R)
 
         self.CheckGainMatched()
 
-    def CheckAligned(self):
-        try:
-            Align = self.ArgsDict['Align']
-            if Align:
-                self.RBackground = AlignImages()
-        except AttributeError:
-            Align = False
+    def MakeDefaults(self):
+        '''Set up default optional arguments'''
+
+        default = {
+            'Align': False, 
+            'Beta': 99999., 
+            'Interactive': False, 
+            'Gamma': 99999., 
+            'RefPSF': '', 
+            'NewPSF': '', 
+            'RefBackground': self.Rf, 
+            'RefFWHM': 1.5, 
+            'RefNoise': 5., 
+            'RefReadNoise': 0., 
+            'RefSaturation': 10e6, #GetSaturationCount(self.Rf), 
+            'RefVariance': '', 
+            'NewBackground': self.Nf, 
+            'NewFWHM': 1.5, 
+            'NewNoise': 5.,
+            'NewReadNoise': 0., 
+            'NewSaturation': 10e6, #GetSaturationCount(self.Nf), 
+            'NewVariance': '', 
+            'PSFfromIRAF': True, 
+            'Show': True, 
+            'SigmaX': 0., 
+            'SigmaY': 0., 
+            'Verbose': False
+        }
+
+        default.update(self.ArgsDict)
+        self.ArgsDict = default
+
+
+    def CheckAlign(self):
+        '''Check if images need alignment'''
+
+        if self.ArgsDict['Align']:
+            self.RBackground = AlignImages(self.Nf, self.Rf)
+            self.Rf = self.Nf.replace('.fits', '.ref.fits')
+
 
     def CheckGainMatched(self):
         '''Check if the gain matching parameters have been found'''
 
+        beta = self.ArgsDict['Beta']
+        gamma = self.ArgsDict['Gamma']
         # if user hasn't supplied beta and gamma, fit them
-        try:
-            self.beta = self.ArgsDict['beta']
-            self.gamma = self.ArgsDict['gamma']
-        except KeyError:
+        if beta == 99999 or gamma == 99999:
             print 'Gain matching not done; fitting manually'
-            #sources = np.array(sextractor(self.Nf)).transpose()
-            #source_index = np.argsort(sources[:, 4])
-            #source_sorted = sources[source_index]
 
-            # add support for local gain matching once fitting improves
-            self.beta, self.gamma = self.MatchGain()#catalog = source_sorted)
+            self.beta, self.gamma = self.MatchGain()
 
+        else:
+            self.beta = beta
+            self.gamma = gamma
+            #PlotSolution(self.N, self.R, self.Pn, self.Pr, self.sn, self.sr, beta = self.beta, gamma = self.gamma, NSaturation = GetSaturationCount(self.Nf), RSaturation = GetSaturationCount(self.Rf))
+
+
+    def CheckPSFsExist(self):
+        '''Check if user provided a psf and make one if necessary'''
+
+        Prf = self.ArgsDict['RefPSF']
+        Pnf = self.ArgsDict['NewPSF']
+        if Prf != '':
+            self.Pnf = Pnf
+        else:
+            FWHM = self.ArgsDict['NewFWHM']
+            Noise = self.ArgsDict['NewNoise']
+            self.Pnf = FitPSF(self.Nf, FWHM, Noise, Verbose = self.ArgsDict['Verbose'], Show = self.ArgsDict['Show'])
+            self.ArgsDict.update({'PSFfromIRAF': True})
+
+        if Pnf != '':
+            self.Prf = Prf
+        else:
+            FWHM = self.ArgsDict['RefFWHM']
+            Noise = self.ArgsDict['RefNoise']
+            self.Prf = FitPSF(self.Rf, FWHM, Noise, Verbose = self.ArgsDict['Verbose'], Show = self.ArgsDict['Show'])
+            self.ArgsDict.update({'PSFfromIRAF': True})
+            
 
     def CheckPSFfromIRAF(self):
         '''Check if user specified IRAF psf or actual psf'''
@@ -67,7 +129,7 @@ class OptimalSubtraction:
             else:
                 self.Pn = fits.getdata(self.Pnf)
                 self.Pr = fits.getdata(self.Prf)
-        except AttributeError:
+        except KeyError:
             self.Pn = fits.getdata(self.Pnf)
             self.Pr = fits.getdata(self.Prf)
 
@@ -75,12 +137,13 @@ class OptimalSubtraction:
     def D(self, normalize = '', diagnostic = False):
         '''Calculate proper subtraction image and normalize to zero point of reference or target'''
 
-        NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
+        N, R, Pn, Pr, sn, sr = self.N, self.R, self.Pn, self.Pr, self.sn, self.sr
 
+        #save convolved not gain matched images that will be subtracted
         if diagnostic:
             print 'Saving Deconvolved images'
-            N_hat = np.fft.fft2(self.NBackground)    
-            R_hat = np.fft.fft2(self.RBackground)
+            N_hat = np.fft.fft2(self.N)    
+            R_hat = np.fft.fft2(self.R)
             Pr_hat = np.fft.fft2(self.Pr)
             Pn_hat = np.fft.fft2(self.Pn)
             Den = self.sr ** 2 * abs(Pn_hat) ** 2 + self.sn ** 2 * abs(Pr_hat) ** 2
@@ -94,15 +157,15 @@ class OptimalSubtraction:
 
 
         # calculate D
-        R = np.copy(RBackground)
-        N = np.subtract(NBackground, self.gamma)
+        N = np.subtract(N, self.gamma)
+
+        beta = self.beta
 
         N_hat = np.fft.fft2(N)
         R_hat = np.fft.fft2(R)
         Pr_hat = np.fft.fft2(Pr)
         Pn_hat = np.fft.fft2(Pn)
 
-        beta = self.beta
         Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
         SqrtDen = np.sqrt(Den)
 
@@ -120,6 +183,11 @@ class OptimalSubtraction:
         return np.real(DNormalize)
 
 
+    def DNoise(self):
+        a = self.N.shape
+        deltaD = deltaD_hat * abs(np.divide(D_hat[a,a] * np.exp(2*np.pi*1j*np.dot(a,a)) - D_hat[0, 0], 2*np.pi*1j*D_hat))
+
+
     def Fd(self):
         '''Calculate the flux based zero point of D'''
         Fd = self.beta / np.sqrt(self.sn**2 + self.sr**2*self.beta**2)
@@ -127,13 +195,15 @@ class OptimalSubtraction:
         return np.real(Fd)
 
 
+#    def FindTransients(self):
 
-    def Flux(self):
+
+    def Flux(self, normalize = ''):
         '''Calculate transient Flux'''
         try:
             Flux = self.S_ / self.Fs_
         except AttributeError:
-            Flux = self.S() / self.Fs()
+            Flux = self.S(normalize) / self.Fs()
         self.Flux_ = Flux
         return Flux
 
@@ -149,6 +219,28 @@ class OptimalSubtraction:
         Fs = np.sum(beta ** 2 * abs(Pn_hat) * abs(Pr_hat) / Den)
         self.Fs_ = Fs
         return Fs
+
+    def Kernels(self):
+        '''Calculate convolution kernels'''
+
+        N, R, Pn, Pr, sn, sr = self.N, self.R, self.Pn, self.Pr, self.sn, self.sr
+        N = np.subtract(N, self.gamma)
+
+        N_hat = np.fft.fft2(N)    
+        R_hat = np.fft.fft2(R)
+        Pr_hat = np.fft.fft2(Pr)
+        Pn_hat = np.fft.fft2(Pn)
+
+        beta = self.beta
+        Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
+
+        Kr_hat = (beta ** 2 * np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
+        Kr = np.real(np.fft.ifft2(Kr_hat))
+
+        Kn_hat = (beta * np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
+        Kn = np.real(np.fft.ifft2(Kn_hat))
+        return Kn, Kr
+
 
     def MakeCatalog(self, SortBy = 'magnitude'):
         '''Check for source catalog and make one if necessary'''
@@ -179,12 +271,14 @@ class OptimalSubtraction:
             self.Catalog = source_sorted
             return source_sorted
 
-    def MatchGain(self, catalog = 'center'):
+    def MatchGain(self):
         '''Call gain matching function'''
-        NSat = GetSaturationCount(self.Nf)
-        RSat = GetSaturationCount(self.Rf)
-        beta, gamma, betaError, gammaError = FitB(self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr, 
-                                                  catalog = catalog, NSaturation = NSat, RSaturation = RSat) # change to include catalog later
+
+        NSat = self.ArgsDict['RefSaturation']
+        RSat = self.ArgsDict['NewSaturation']
+        beta, gamma, betaError, gammaError = FitB(self.N, self.R, self.Pn, self.Pr, self.sn, self.sr, 
+                                                  NSaturation = NSat, RSaturation = RSat, Interactive = self.ArgsDict['Interactive'])
+
         return beta, gamma
 
 
@@ -214,8 +308,9 @@ class OptimalSubtraction:
         self.S_ = np.real(S)
         return np.real(S)
 
-    def SaveDToDB(self, Df, normalize):
+    def SaveD(self, Df, normalize = ''):
         '''Calculate and save proper subtraction image to database'''
+
         self.Df = Df
         self.D(normalize)
         hdu = fits.PrimaryHDU(np.real(self.D_))
@@ -224,6 +319,62 @@ class OptimalSubtraction:
         hdu.header['BETA'] = self.beta
         hdu.header['GAMMA'] = self.gamma
         hdu.writeto(self.Df, clobber = True)
+
+    def SaveS(self, Sf, normalize = ''):
+        '''Calculate and save S to database'''
+
+        self.Sf = Sf
+        self.S()
+        hdu = fits.PrimaryHDU(np.real(self.S_))
+        #hdu.header = fits.getheader(self.Nf)
+        hdu.header['PHOTNORM'] = normalize
+        hdu.header['BETA'] = self.beta
+        hdu.header['GAMMA'] = self.gamma
+        hdu.writeto(self.Sf, clobber = True)
+
+    def SaveScorr(self, Scorrf, normalize = ''):
+        '''Calculate and save S to database'''
+
+        self.Scorrf = Scorrf
+        self.Scorr()
+        hdu = fits.PrimaryHDU(np.real(self.Scorr_))
+        #hdu.header = fits.getheader(self.Nf)
+        hdu.header['PHOTNORM'] = normalize
+        hdu.header['BETA'] = self.beta
+        hdu.header['GAMMA'] = self.gamma
+        hdu.writeto(self.Scorrf, clobber = True)
+
+    def SaveScorrThreshold(self, ScorrThreshf, Thresh = 3., normalize = ''):
+        '''Save a Scorr such that pixel = 1 if > Thresh else pix = 0'''
+
+        self.ScorrThreshf = ScorrThreshf
+        self.Scorr()
+        BrightIndex = np.where(self.Scorr_ >= Thresh)
+        DarkIndex = np.where(self.Scorr_ < Thresh)
+        ScorrThresh = np.copy(self.Scorr_)
+        ScorrThresh[BrightIndex] = 1
+        ScorrThresh[DarkIndex] = 0
+        self.ScorrThresh = ScorrThresh        
+
+        hdu = fits.PrimaryHDU(np.real(self.ScorrThresh))
+        #hdu.header = fits.getheader(self.Nf)
+        hdu.header['PHOTNORM'] = normalize
+        hdu.header['BETA'] = self.beta
+        hdu.header['GAMMA'] = self.gamma
+        hdu.writeto(self.ScorrThreshf, clobber = True)
+
+
+    def SaveSnoise(self, Snoisef, normalize = ''):
+        '''Calculate and save S to database'''
+
+        self.Snoisef = Snoisef
+        self.Snoise()
+        hdu = fits.PrimaryHDU(np.real(self.Snoise_))
+        #hdu.header = fits.getheader(self.Nf)
+        hdu.header['PHOTNORM'] = normalize
+        hdu.header['BETA'] = self.beta
+        hdu.header['GAMMA'] = self.gamma
+        hdu.writeto(self.Snoisef, clobber = True)
 
     def SaveImageToWD(self):
         '''Save various images to working directory (testing only)'''
@@ -237,21 +388,21 @@ class OptimalSubtraction:
 
     def Scorr(self):
         '''Calculate Scorr'''
+
         try:
             Scorr = self.S_ / self.Snoise_
         except AttributeError:
             Scorr = self.S() / np.sqrt(self.Snoise())
         self.Scorr_ = np.real(Scorr)
-        return np.real(Scorr)
+        return np.real(Scorr)        
 
 
     def Snoise(self):
         '''Calculate the noise image for Scorr'''
         # this whole function needs optimization
 
-        NBackground, RBackground, Pn, Pr, sn, sr = self.NBackground, self.RBackground, self.Pn, self.Pr, self.sn, self.sr
-        R = np.copy(RBackground)
-        N = np.subtract(NBackground, self.gamma)
+        N, R, Pn, Pr, sn, sr = self.N, self.R, self.Pn, self.Pr, self.sn, self.sr
+        N = np.subtract(N, self.gamma)
 
         N_hat = np.fft.fft2(N)    
         R_hat = np.fft.fft2(R)
@@ -261,74 +412,116 @@ class OptimalSubtraction:
         beta = self.beta
         Den = sr ** 2 * beta ** 2 * abs(Pn_hat) ** 2 + sn ** 2 * abs(Pr_hat) ** 2
 
-        Kn_hat = (np.conj(Pn_hat) * abs(Pr_hat) ** 2) / Den
-        Kr_hat = (np.conj(Pr_hat) * abs(Pn_hat) ** 2) / Den
-        Kn2_hat = np.fft.fft2(np.fft.ifft2(beta * Kn_hat) ** 2)
-        Kr2_hat = np.fft.fft2(np.fft.ifft2(beta ** 2 * Kr_hat) ** 2)
+        Kn, Kr = self.Kernels()
 
-        try:
-            VarFilename = self.ArgsDict['nVariance']
-            EpsN = fits.getdata(VarFilename)
-            V_Sn = np.fft.ifft2(Kr2_hat * np.fft.fft2(EpsN))
-        except KeyError:
-            V_Sn = np.fft.ifft2(Kn2_hat * N_hat)
+        Kn2_hat = np.fft.fft2(Kn ** 2)
+        Kr2_hat = np.fft.fft2(Kr ** 2)
 
-        try:
-            VarFilename = self.ArgsDict['rVariance']
-            EpsR = fits.getdata(VarFilename)
-            V_Sr = np.fft.ifft2(Kr2_hat * np.fft.fft2(EpsN))
-        except KeyError:
-            V_Sr = np.fft.ifft2(Kr2_hat * R_hat)
+        if self.ArgsDict['NewVariance'] != '':
+            NVarFilename = self.ArgsDict['NewVariance']
+            EpsN = fits.getdata(NVarFilename)
+            s = N.shape
+            EpsN = EpsN[:s[0], :s[1]]
+            V_Sn = np.fft.ifft2(Kn2_hat * np.fft.fft2(EpsN))
 
-        f = open('transform')
-        for line in f:
-            if 'xrms' in line:
-                xrms = float(line.split()[1])
-            elif 'yrms' in line:
-                yrms = float(line.split()[1])
-        f.close()
+        else:
+            NReadNoise = self.ArgsDict['NewReadNoise']
+            EpsN = np.add(abs(self.NBackground), NReadNoise ** 2)
+            V_Sn = np.fft.ifft2(Kn2_hat * np.fft.fft2(EpsN))
 
-        GradNy, GradNx = np.gradient(np.fft.ifft2(beta * Kn_hat * N_hat))
-        GradRy, GradRx = np.gradient(np.fft.ifft2(beta ** 2 * Kr_hat * R_hat))
+        if self.ArgsDict['RefVariance'] != '':
+            RVarFilename = self.ArgsDict['RefVariance']
+            EpsR = fits.getdata(RVarFilename)
+            s = N.shape
+            EpsR = EpsR[:s[0], :s[1]]
+            V_Sr = np.fft.ifft2(Kr2_hat * np.fft.fft2(EpsR))
+
+        else:
+            RReadNoise = self.ArgsDict['RefReadNoise']
+            EpsR = np.add(abs(self.RBackground), RReadNoise ** 2)
+            V_Sr = np.fft.ifft2(Kr2_hat * np.fft.fft2(EpsR))
+
+        xrms = self.ArgsDict['SigmaX']
+        yrms = self.ArgsDict['SigmaY']
+
+        GradNy, GradNx = np.gradient(np.fft.ifft2(np.fft.fft2(Kn) * N_hat))
+        GradRy, GradRx = np.gradient(np.fft.ifft2(np.fft.fft2(Kr) * R_hat))
 
         Vr_ast = xrms ** 2 * GradRx ** 2 + yrms ** 2 * GradRy ** 2
         Vn_ast = xrms ** 2 * GradNx ** 2 + yrms ** 2 * GradNy ** 2
 
-        Snoise = V_Sn + V_Sr #+ Vr_ast + Vn_ast
+        Snoise = V_Sn + V_Sr + Vr_ast + Vn_ast
         self.Snoise_ = np.real(Snoise)
         return np.real(Snoise)
 
 
+def AlignImages(NewFile, RefFile):
+    '''Align reference image to new image when both images have WCS'''
+
+    TempFile = NewFile.replace('.fits', '.ref.fits')
+    iraf.wregister(RefFile, NewFile, TempFile)
+    #system('cp {0} {1}'.format(TempFile, NewFile.replace('.fits', '.ref.fits')))
+    AlignedRef = fits.getdata(TempFile)
+    return AlignedRef
 
 
+def CleanDataIndex(Data, SatCount = None, RmBackPix = True, Significance = 1.):
+    '''Clean saturated and background pixels from dataset'''
 
-def AlignPSF(PSF, Coords):
-    '''Roll PSF to correct for registration errors'''
-    PSF = scipy.ndimage.interpolation.shift(PSF, Coords)
-    return PSF
+    if SatCount is not None:
+        UnSatPixIndex = np.where(Data < SatCount)
+    else:
+        UnSatPixIndex = np.arange(Data.size)
 
+    if RmBackPix:
+        Thresh = np.median(Data) +  Significance * np.std(Data)
+        NotBackPixIndex = np.where(Data > Thresh)
+    else:
+        NotBackPixIndex = np.arange(Data.size)
+    
+    GoodPixInCommon = np.intersect1d(UnSatPixIndex, NotBackPixIndex)
+    return GoodPixInCommon
+
+
+def ConvertWeightToVariance(image):
+    '''Convert swarp weight image to variance; taken from externaldata.py'''
+
+    # the output of swarp give the normalized weight 
+    # we want to store the variance image
+    # we invert the normalized weight and we "de-normalized" this image
+    hd = fits.getheader(image)
+    ar = fits.getdata(image)
+    hd2 = fits.getheader(image.replace('.fits', '.weight.fits'))
+    ar2 = fits.getdata(image.replace('.fits', '.weight.fits'))
+    variance = 1 / ar2
+    #  this is to take in account that the weight is normalized
+    variance *= (np.median(np.abs(ar - np.median(ar)))*1.48)**2/np.median(variance)
+    varimg = image.replace('.fits', '.var.fits')
+    _saturate = GetSaturationCount(image)
+    ar = np.where(ar2 == 0, _saturate, ar)
+
+    fits.writeto(varimg, variance, hd2, clobber=True)
+
+    # put the saturation all values where the weight is zero 
 
 def CropImages(N, R, Pn, Pr):
     '''Open and crop images and PSFs to the same size'''
 
-    if N.shape[0] <= R.shape[0] & N.shape[1] <= R.shape[1]:
-        s = N.shape
-    elif N.shape[0] > R.shape[0] & N.shape[1] > R.shape[1]:
-        s = R.shape
-    else:
-        s = [np.min([N.shape[0], R.shape[0]]), np.min([N.shape[1], R.shape[1]])]
+    sN = N.shape
+    #sR = R.shape
+    #s = [np.min([sN[0], sR[0]]), np.min([sN[1], sR[1]])]
+    #N = N[:s[0], :s[1]]
+    #R = R[:s[0], :s[1]]
 
-    N = N[:s[0], :s[1]]
-    R = R[:s[0], :s[1]]
-
-    Pn_extended = PadPSF(Pn, N.shape)
-    Pr_extended = PadPSF(Pr, N.shape)
+    Pn_extended = PadPSF(Pn, sN)
+    Pr_extended = PadPSF(Pr, sN)
 
     return N, R, Normalize(Pn_extended), Normalize(Pr_extended)
 
 
 def GetSaturationCount(filename):
     '''Get pixel saturation count for a given image'''
+
     sat = []
     Header = fits.getheader(filename)
     try:
@@ -354,93 +547,193 @@ def ExtractPSF(Pf):
 
     iraf.noao()
     iraf.digiphot()
-    iraf.daophot()
-    iraf.seepsf(Pf,'temp.psf.fits')
+    iraf.daophot(_doprint = 0)
+    iraf.seepsf(Pf, 'temp.psf.fits')
     PSF = fits.open('temp.psf.fits')[0].data
     system('rm temp.psf.fits')
 
     return PSF
 
 
-def FitB(NBackground, RBackground, Pn, Pr, sn, sr, catalog = 'center', NSaturation = None, RSaturation = None):
+def FitB(NBackground, RBackground, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None, Interactive = False):
     '''Fit gain matching (beta) and background (gamma) parameters'''
 
-    if catalog is 'center':
-        center, d = NBackground.shape[0] / 2, 750
-        a, b = center - d, center + d
-        coords = [[a, b, a, b]]
+    center, d = NBackground.shape[0] / 2, NBackground.shape[0] / 20
+    a, b = center - d, center + d
+    coords = [[a, b, a, b]]
 
-    elif catalog == 'grid':
-        EdgeBuffer = 500
-        resolution =  20
-        d = 200
-        xGrid = np.linspace(EdgeBuffer, NBackground.shape[0] - EdgeBuffer, num = resolution)
-        yGrid = np.linspace(EdgeBuffer, NBackground.shape[1] - EdgeBuffer, num = resolution)
-        x, y = np.meshgrid(xGrid, yGrid)
-        centers = np.array([x.flatten(), y.flatten()]).transpose()
-        coords = [[int(c[0] - d), int(c[0] + d), int(c[1] - d), int(c[1] + d)] for c in centers]
-
-    else:
-        # this doesn't work well; fix later or remove
-        d = 100
-        coords = [[int(star[0] - d), int(star[0] + d), int(star[1] - d), int(star[1] + d)] 
-                  for star in catalog if star[0] > d and star[0] < NBackground.shape[0] - d and star[1] > d and star[1] < NBackground.shape[1] - d]
-    g = []
-    b = []
-    be = []
-    ge = []
     for star in coords:
         N = NBackground[star[0]:star[1], star[2]:star[3]]
         R = RBackground[star[0]:star[1], star[2]:star[3]]
-        Pn = Pn[0:2 * d, 0:2 * d]
-        Pr = Pr[0:2 * d, 0:2 * d]
+
+        # trim PSFs to image size
+        Pn = np.roll(Pn, Pn.shape[0] / 2, 0)
+        Pn = np.roll(Pn, Pn.shape[1] / 2, 1)
+        Pn = Pn[star[0]:star[1], star[2]:star[3]]
+        Pn = np.roll(Pn, Pn.shape[0] / 2, 0)
+        Pn = np.roll(Pn, Pn.shape[1] / 2, 1)
+
+        Pr = np.roll(Pr, Pr.shape[0] / 2, 0)
+        Pr = np.roll(Pr, Pr.shape[1] / 2, 1)
+        Pr = Pr[star[0]:star[1], star[2]:star[3]]
+        Pr = np.roll(Pr, Pr.shape[0] / 2, 0)
+        Pr = np.roll(Pr, Pr.shape[1] / 2, 1)
 
         print 'x: {0}, y: {1}'.format(star[0] + d, star[2] + d)
         # iteratively solve for linear fit of beta and gamma
-        beta, gamma, betaError, gammaError = IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
-        if catalog == 'grid':
-            g.append(gamma)
-            b.append(beta)
-            ge.append(gammaError)
-            be.append(betaError)
+        if Interactive:
+            beta, gamma, betaError, gammaError = InteractiveFit(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
+        else:
+            beta, gamma, betaError, gammaError = IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
 
-    if catalog == 'center':
-        return beta, gamma, betaError, gammaError
+    return beta, gamma, betaError, gammaError
 
-    elif catalog == 'grid':
-        shape = NBackground.shape
-        betaMatrix = ListToArray(b, shape)
-        betaErrorMatrix = ListToArray(be, shape)
-        gammaMatrix = ListToArray(g, shape)
-        gammaErrorMatrix = ListToArray(ge, shape)
-        return betaMatrix, gammaMatrix, betaErrorMatrix, gammaErrorMatrix
 
+def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCount = 15000.):
+    '''Fit the PSF given an image file name'''
+
+    if Verbose:
+        verb = 'yes'
     else:
-        return np.mean(beta), np.mean(gamma), np.mean(betaError), np.mean(gammaError)
+        verb = 'no'
+    PSFisGood = False
 
+    CoordsFile = ImageFile + '.coo'
+    MagFile = ImageFile + '.mag'
+    PSTFile = ImageFile + '.pst'
+    PSFFile = ImageFile + '.psf'
+    OpstFile = ImageFile + '.opst'
+    GroupFile = ImageFile + '.group'
+    SeeFile = ImageFile + '.see'
+
+
+    while not PSFisGood:
+        system('rm {} {} {} {} {} {} {}'.format(PSFFile + '.fits', CoordsFile, MagFile, PSTFile, OpstFile, GroupFile, SeeFile))
+
+        try:
+            # generate star catalog using daofind
+            iraf.noao()
+            iraf.digiphot()
+            iraf.daophot(_doprint = 0)
+            iraf.datapars.datamax = MaxCount
+            iraf.datapars.fwhmpsf = FWHM
+            iraf.datapars.sigma = Noise
+            iraf.findpars.threshold = 5.
+            iraf.datapars.datamin = 0
+            iraf.datapars.datamax = MaxCount
+            iraf.daofind(ImageFile, output = CoordsFile, verify = 'no', display = 'no', verbose = verb)
+
+            # uncomment the raw_input line if daofind adds stars that do not exist in catalog
+            # this gives you time to manually remove nonexistent stars that cause a bad psf fit
+            # this is temporary until daofind works better with images coadded with swarp
+            #raw_input('Manually edit .coo file now; Press enter to continue ')
+
+            # do aperture photometry
+            a1, a2, a3, a4, = int(FWHM + 0.5), int(FWHM * 2 + 0.5), int(FWHM * 3 + 0.5), int(FWHM * 4 + 0.5)
+            iraf.photpars.apertures = '{0},{1},{2}'.format(a2, a3, a4)
+            iraf.centerpars.calgori = 'centroid'
+            iraf.fitskypars.salgori = 'mode'
+            iraf.fitskypars.annulus = 10
+            iraf.fitskypars.dannulu = 10
+            iraf.phot(ImageFile, CoordsFile, MagFile, verify = 'no', verbose = verb)
+
+            # select PSF stars
+            iraf.daopars.fitrad = a1
+            iraf.daopars.nclean = 4
+            iraf.daopars.varorder = 0
+            iraf.daopars.recenter = 'yes'
+            iraf.pstselect(ImageFile, MagFile, PSTFile, maxnpsf = 50, verify = 'no', verbose = verb)
+
+            # make PSF
+            iraf.psf(ImageFile, MagFile, PSTFile, PSFFile, OpstFile, GroupFile, verify = 'no', verbose = verb, interactive = 'no')
+
+            # show psf to user for approval
+            if Show:
+                system ('rm {}'.format(SeeFile + '.fits'))
+                iraf.seepsf(PSFFile, SeeFile)
+                iraf.surface(SeeFile)
+                PSFisGoodyn = raw_input('GoodPSF? y/n: ')
+                if PSFisGoodyn == 'y':
+                    PSFisGood = True
+                else:
+                    FWHMguess = raw_input('New FWHM: [{}] '.format(FWHM))
+                    Noiseguess = raw_input('New Noise: [{}] '.format(Noise))
+                    if FWHMguess != '':
+                        FWHM = float(FWHMguess)
+                    if Noiseguess != '':
+                        Noise = float(Noiseguess)
+
+            else:
+                break
+
+        except:
+            print 'PSF fitting failed; try again with different parameters'
+            FWHM = float(raw_input('New FWHM: '))
+            Noise = float(raw_input('New Noise: '))
+
+    return PSFFile
+
+        
 
 def gamma(beta, gammaPrime, sn, sr):
+    '''Convert params in fourier space to image space'''
+
     return gammaPrime * np.sqrt(sn ** 2 + beta ** 2 * sr ** 2)
 
+def InteractiveFit(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None):
+    N_hat = np.fft.fft2(N)    
+    R_hat = np.fft.fft2(R)
+    Pr_hat = np.fft.fft2(Pr)
+    Pn_hat = np.fft.fft2(Pn)
 
-def InterpolateSaturatedStars(image, psf, catalog):
-    '''Take saturated stars and interpolate based on psf'''
-    # figure this out later...
-    scipy.signal.correlate2d(image, psf)
-    return None
+    GoodFit = False
+    beta = 1.
+    gamma = 0.
+
+    while not GoodFit:
+
+        SqrtDen = np.sqrt(sn ** 2 * abs(Pr_hat) ** 2 + beta ** 2 * sr ** 2 * abs(Pn_hat) ** 2)
+        Dn_hat = Pr_hat * N_hat / SqrtDen
+        Dr_hat = Pn_hat * R_hat / SqrtDen
+        Dn = np.real(np.fft.ifft2(Dn_hat))
+        Dr = np.real(np.fft.ifft2(Dr_hat))
+        DnFlatten = Dn.flatten()
+        DrFlatten = Dr.flatten()
+
+        # remove saturated pixels
+        DnGoodPix = CleanDataIndex(DnFlatten, SatCount = NSaturation)
+        DrGoodPix = CleanDataIndex(DrFlatten, SatCount = RSaturation)
+        GoodPixInCommon = np.intersect1d(DnGoodPix, DrGoodPix)
+        DnFlatten = DnFlatten[GoodPixInCommon]
+        DrFlatten = DrFlatten[GoodPixInCommon]
+
+        plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, np.polyval([beta, gamma], DrFlatten), 'r-')
+        plt.show(block = False)
+
+        GoodFityn = raw_input('Good Fit? y/[n]/b: ')
+        if GoodFityn == 'y':
+            GoodFit = True
+        elif GoodFityn == 'b':
+            print 'Bad dataset: check your images for cosmic rays, saturated stars, registration errors and bad PSFs'
+            quit()
+        else:
+            beta = float(input('New beta: [{}] '.format(beta)))
+            gamma = float(input('New gamma: [{}] '.format(gamma)))
+        plt.show()
+    return beta, gamma, 0, 0 # functions expect error output
 
 
-def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None):
+def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None, interactive = False):
     '''Solve for linear fit iteratively'''
 
-    BetaTolerance = 1e-5
-    GammaPrimeTolerance = 1e-5
+    BetaTolerance = 1e-8
+    GammaPrimeTolerance = 1e-8
     beta = 1.
     gammaPrime = 0.
     beta0 = 10e5
     gammaPrime0 = 10e5
     i = 0
-    MaxIteration = 5
+    MaxIteration = 10
 
     N_hat = np.fft.fft2(N)    
     R_hat = np.fft.fft2(R)
@@ -450,7 +743,6 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None)
     while abs(beta - beta0) > BetaTolerance or abs(gammaPrime - gammaPrime0) > GammaPrimeTolerance:
 
         SqrtDen = np.sqrt(sn ** 2 * abs(Pr_hat) ** 2 + beta ** 2 * sr ** 2 * abs(Pn_hat) ** 2)
-        ScalarDen = np.sqrt(sn ** 2 + beta ** 2 * sr ** 2)
         Dn_hat = Pr_hat * N_hat / SqrtDen
         Dr_hat = Pn_hat * R_hat / SqrtDen
         Dn = np.real(np.fft.ifft2(Dn_hat))
@@ -459,17 +751,18 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None)
         DrFlatten = Dr.flatten()
 
         # remove saturated pixels
-        DnIndex = np.where(DnFlatten < NSaturation / ScalarDen)
-        DrIndex = np.where(DrFlatten < RSaturation / ScalarDen)
-        GoodPixInCommon = np.intersect1d(DnIndex, DrIndex)
+        DnGoodPix = CleanDataIndex(DnFlatten, SatCount = NSaturation, Significance = 3.)
+        DrGoodPix = CleanDataIndex(DrFlatten, SatCount = RSaturation, Significance = 3.)
+        GoodPixInCommon = np.intersect1d(DnGoodPix, DrGoodPix)
         DnFlatten = DnFlatten[GoodPixInCommon]
         DrFlatten = DrFlatten[GoodPixInCommon]
 
         beta0, gammaPrime0 = beta, gammaPrime
 
-        x = sm.add_constant(DrFlatten)#[index])
-        y = DnFlatten#[index]
+        x = sm.add_constant(DrFlatten)
+        y = DnFlatten
 
+        
         RobustFit = sm.RLM(y, x).fit()
         Parameters = RobustFit.params
         Errors = RobustFit.bse
@@ -485,22 +778,46 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None)
 
     print 'Fit done in {} iterations'.format(i)
 
-    #plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, RobustFit.fittedvalues, 'r-')
-    #plt.show()
+    plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, RobustFit.fittedvalues, 'r-')
+    plt.show()
+    #PlotSolution(N, R, Pn, Pr, sn, sr, beta = beta, gamma = gamma, NSaturation = NSaturation, RSaturation = RSaturation)
+
     print 'Beta = ' + str(beta)
     print 'Gamma = ' + str(gamma(beta, gammaPrime, sn, sr))
     return beta, gamma(beta, gammaPrime, sn, sr), betaError, gammaPrimeError
 
 
-def ListToArray(List, shape):
-    '''Take a list and turn it into an interpolated array'''
-    resolution = int(np.sqrt(len(List)))
-    parMatrix = np.array(List).reshape(2 * [resolution]).transpose()
-    parMatrixFull = scipy.misc.imresize(parMatrix, shape, interp = 'nearest')
-    return parMatrixFull
+def PlotSolution(N, R, Pn, Pr, sn, sr, beta = 1., gamma = 0., NSaturation = None, RSaturation = None):
+    '''Plot the data and the fit for visual comparison'''
+
+    N_hat = np.fft.fft2(N)    
+    R_hat = np.fft.fft2(R)
+    Pr_hat = np.fft.fft2(Pr)
+    Pn_hat = np.fft.fft2(Pn)
+
+    SqrtDen = np.sqrt(sn ** 2 * abs(Pr_hat) ** 2 + beta ** 2 * sr ** 2 * abs(Pn_hat) ** 2)
+    Dn_hat = Pr_hat * N_hat / SqrtDen
+    Dr_hat = Pn_hat * R_hat / SqrtDen
+    s, d = N.shape[0], N.shape[0] / 8
+    Dn = np.real(np.fft.ifft2(Dn_hat))[s-d: s+d, s-d: s+d]
+    Dr = np.real(np.fft.ifft2(Dr_hat))[s-d: s+d, s-d: s+d]
+    DnFlatten = Dn.flatten()
+    DrFlatten = Dr.flatten()
+
+    DnGoodPix = CleanDataIndex(DnFlatten, SatCount = NSaturation, Significance = 1.)
+    DrGoodPix = CleanDataIndex(DrFlatten, SatCount = RSaturation, Significance = 1.)
+    GoodPixInCommon = np.intersect1d(DnGoodPix, DrGoodPix)
+    DnFlatten = DnFlatten[GoodPixInCommon]
+    DrFlatten = DrFlatten[GoodPixInCommon]
+    print len(DnFlatten), len(DrFlatten)
+
+    plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, np.polyval([beta, gamma], DrFlatten), 'r-')
+    plt.show()
 
 
 def Normalize(Image):
+    '''Normalize to sum = 1'''
+
     return Image / np.sum(Image)
 
 
@@ -529,11 +846,42 @@ def RemoveSaturatedFromCatalog(catalog):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Perform optimal image subtraction')
-    parser.add_argument('-i', dest = 'input', help = 'Input image')
-    parser.add_argument('-t', dest = 'template', help = 'Template image')
+    parser.add_argument('-N', dest = 'input', help = 'New background subtracted image')
+    parser.add_argument('-R', dest = 'template', help = 'Reference background subtracted image')
+    parser.add_argument('-n', dest = 'input_PSF', default = '', help = 'New PSF')
+    parser.add_argument('-r', dest = 'template_PSF', default = '', help = 'Reference PSF')
     parser.add_argument('-o', dest = 'output', help = 'Output image')
+    parser.add_argument('--NewBackground', dest = 'NewBackground', help = 'New image with background')
+    parser.add_argument('--RefBackground', dest = 'RefBackground', help = 'Reference image with background')
+    parser.add_argument('--type', dest = 'type', default = 'D', help = 'Subtraction type')
+    parser.add_argument('--threshold', dest = 'threshold', help = 'Sigma threshold for detection')
+    
+    parser.add_argument('--interactive', dest = 'interactive', action = 'store_true', default = False, help = 'Fit beta and gamma interactively')
+    parser.add_argument('--verbose', dest = 'verbose', action = 'store_true', default = False, help = 'Show IRAF output in PSF fitting')
+    parser.add_argument('-b', dest = 'beta', default = 99999, help = 'Gain matching parameter beta')
+    parser.add_argument('-g', dest = 'gamma', default = 99999, help = 'Gain matching parameter gamma')
+    parser.add_argument('--normalize', default = '', dest = 'normalize', help = 'Normalize to which image')
     args = parser.parse_args()
 
-    OptimalSubtraction(args.input, args.template).SaveDtoDB(args.output)
+    d = {
+        'NewPSF': args.input_PSF, 
+        'RefPSF': args.input_PSF, 
+        'Interactive': args.interactive, 
+        'Beta': float(args.beta), 
+        'Gamma': float(args.gamma), 
+        'Verbose': args.verbose, 
+        'NewBackground': args.NewBackground, 
+        'RefBackground': args.RefBackground
+        }
 
+    if args.type == 'D':
+        OptimalSubtraction(args.input, args.template, d).SaveD(args.output, args.normalize)
+    elif args.type == 'Scorr':
+        OptimalSubtraction(args.input, args.template, d).SaveScorr(args.output, args.normalize)
+    elif args.type == 'S':
+        OptimalSubtraction(args.input, args.template, d).SaveS(args.output, args.normalize)
+    elif args.type == 'Thresh':
+        OptimalSubtraction(args.input, args.template, d).SaveScorrThreshold(args.output, normalize = args.normalize, Thresh = args.threshold)
+    else:
+        pass
 
