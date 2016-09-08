@@ -24,18 +24,21 @@ class OptimalSubtraction:
         self.Nf, self.Rf = Nf, Rf
         self.MakeDefaults()
 
+        
         self.NBackground = fits.getdata(self.ArgsDict['NewBackground'])
         self.RBackground = fits.getdata(self.ArgsDict['RefBackground'])
-        self.Nf, self.Rf = Nf, Rf
+        #self.Nf, self.Rf = Nf, Rf
+
         self.CheckPSFsExist()
 
         self.CheckPSFfromIRAF()
         self.CheckAlign()
 
         self.N, self.R, self.Pn, self.Pr = CropImages(fits.getdata(self.Nf), fits.getdata(self.Rf), self.Pn, self.Pr)
+        self.CheckFlatten()
 
-        self.sn = np.std(self.N)
-        self.sr = np.std(self.R)
+        self.sn = self.ArgsDict['NewNoise']
+        self.sr = self.ArgsDict['RefNoise']
 
         self.CheckGainMatched()
 
@@ -46,6 +49,7 @@ class OptimalSubtraction:
             'Align': False, 
             'Beta': 99999., 
             'Interactive': False, 
+            'Flatten': False, 
             'Gamma': 99999., 
             'RefPSF': '', 
             'NewPSF': '', 
@@ -63,8 +67,8 @@ class OptimalSubtraction:
             'NewVariance': '', 
             'PSFfromIRAF': True, 
             'Show': True, 
-            'SigmaX': 0., 
-            'SigmaY': 0., 
+            'SigmaX': 0.1, 
+            'SigmaY': 0.1, 
             'Verbose': False
         }
 
@@ -78,6 +82,12 @@ class OptimalSubtraction:
         if self.ArgsDict['Align']:
             self.RBackground = AlignImages(self.Nf, self.Rf)
             self.Rf = self.Nf.replace('.fits', '.ref.fits')
+
+
+    def CheckFlatten(self):
+        if self.ArgsDict['Flatten']:
+            self.N = SubtractBackground(self.N)
+            self.R = SubtractBackground(self.R)
 
 
     def CheckGainMatched(self):
@@ -559,7 +569,7 @@ def ExtractPSF(Pf):
 def FitB(NBackground, RBackground, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None, Interactive = False):
     '''Fit gain matching (beta) and background (gamma) parameters'''
 
-    center, d = NBackground.shape[0] / 2, NBackground.shape[0] / 20
+    center, d = NBackground.shape[0] / 2, NBackground.shape[0]
     a, b = center - d, center + d
     coords = [[a, b, a, b]]
 
@@ -588,6 +598,48 @@ def FitB(NBackground, RBackground, Pn, Pr, sn, sr, NSaturation = None, RSaturati
             beta, gamma, betaError, gammaError = IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
 
     return beta, gamma, betaError, gammaError
+
+
+def SubtractBackground(data, NumStamps = 30, Border = 200):
+
+    d = (data.shape[0] - 2 * Border) * (data.shape[1] - 2 * Border) / NumStamps ** 2
+    LeftEdge = np.linspace(Border, data.shape[0] - Border, NumStamps)
+    LeftEdge = [int(i) for i in LeftEdge]
+    TopEdge = np.linspace(Border, data.shape[1] - Border, NumStamps)
+    TopEdge = [int(i) for i in TopEdge]
+    SmallImg = np.zeros(2 * [NumStamps])
+    for iIndex, i in enumerate(TopEdge):
+        for jIndex, j in enumerate(LeftEdge):
+            #print i, i+d, j, j+d
+            Stamp = data[i: i + d, j: j + d]
+            Hist, BinEdge = np.histogram(Stamp, bins = 50)
+            x = [(BinEdge[k] + BinEdge[k+1]) / 2 for k in range(len(BinEdge) - 1)]
+            popt, cov = scipy.optimize.curve_fit(Gauss, x, Hist, p0 = [np.max(data), np.median(data), np.std(data)])
+            #print popt
+            SmallImg[jIndex, iIndex] = popt[1]
+            #plt.imshow(Stamp)
+            #plt.show()
+            #plt.plot(x, Hist, x, Gauss(x, *popt))
+            #plt.show()
+    scale = [(data.shape[0] - 2 * d) / SmallImg.shape[0], (data.shape[1] - 2 * d) / SmallImg.shape[1]]
+    print scale
+    BackImg = scipy.ndimage.zoom(SmallImg, scale)
+    s = [data.shape[0]/2 - BackImg.shape[0]/2, data.shape[1]/2 - BackImg.shape[1]/2]
+    BackImgFull = np.rot90(np.fliplr(np.pad(BackImg, ((s[0], s[0]),(s[1], s[1])), 'constant')), 1)
+#    BackImgFull = np.zeros(data.shape)
+#    BackImgFull[Border:data.shape[0]-Border, Border:data.shape[1]-Border] = BackImg
+    dataCorr = data - BackImgFull
+    fits.writeto('back.fits', BackImgFull, clobber = True)
+    fits.writeto('dataCorr.fits', dataCorr, clobber = True)
+
+    plt.imshow(BackImg, interpolation = 'none')
+    plt.show()
+    plt.imshow(dataCorr, interpolation = 'none')
+    plt.show()
+    return dataCorr
+
+def Gauss(x, a, b, c):
+    return a * np.exp(-(x-b)**2/(2*c**2))
 
 
 def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCount = 15000.):
@@ -627,7 +679,7 @@ def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCo
             # uncomment the raw_input line if daofind adds stars that do not exist in catalog
             # this gives you time to manually remove nonexistent stars that cause a bad psf fit
             # this is temporary until daofind works better with images coadded with swarp
-            #raw_input('Manually edit .coo file now; Press enter to continue ')
+            raw_input('Manually edit .coo file now if necessary; Press enter to continue ')
 
             # do aperture photometry
             a1, a2, a3, a4, = int(FWHM + 0.5), int(FWHM * 2 + 0.5), int(FWHM * 3 + 0.5), int(FWHM * 4 + 0.5)
@@ -861,10 +913,14 @@ if __name__ == '__main__':
     parser.add_argument('--verbose', dest = 'verbose', action = 'store_true', default = False, help = 'Show IRAF output in PSF fitting')
     parser.add_argument('-b', dest = 'beta', default = 99999, help = 'Gain matching parameter beta')
     parser.add_argument('-g', dest = 'gamma', default = 99999, help = 'Gain matching parameter gamma')
+    parser.add_argument('--NewNoise', dest = 'NewNoise', default = 5, help = 'Standard deviation of new image background')
+    parser.add_argument('--RefNoise', dest = 'RefNoise', default = 5, help = 'Standard deviation of ref image background')
+    parser.add_argument('--flatten', dest = 'flatten', action = 'store_true', default = False, help = 'Fix Background locally')
     parser.add_argument('--normalize', default = '', dest = 'normalize', help = 'Normalize to which image')
     args = parser.parse_args()
 
     d = {
+        'Flatten': args.flatten, 
         'NewPSF': args.input_PSF, 
         'RefPSF': args.input_PSF, 
         'Interactive': args.interactive, 
@@ -872,7 +928,9 @@ if __name__ == '__main__':
         'Gamma': float(args.gamma), 
         'Verbose': args.verbose, 
         'NewBackground': args.NewBackground, 
-        'RefBackground': args.RefBackground
+        'RefBackground': args.RefBackground, 
+        'NewNoise': float(args.NewNoise), 
+        'RefNoise': float(args.RefNoise)
         }
 
     if args.type == 'D':
