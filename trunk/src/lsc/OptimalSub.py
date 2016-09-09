@@ -25,8 +25,7 @@ class OptimalSubtraction:
         self.MakeDefaults()
 
         
-        self.NBackground = fits.getdata(self.ArgsDict['NewBackground'])
-        self.RBackground = fits.getdata(self.ArgsDict['RefBackground'])
+
         #self.Nf, self.Rf = Nf, Rf
 
         self.CheckPSFsExist()
@@ -35,6 +34,7 @@ class OptimalSubtraction:
         self.CheckAlign()
 
         self.N, self.R, self.Pn, self.Pr = CropImages(fits.getdata(self.Nf), fits.getdata(self.Rf), self.Pn, self.Pr)
+        self.CheckBackground()
         self.CheckFlatten()
 
         self.sn = self.ArgsDict['NewNoise']
@@ -76,12 +76,38 @@ class OptimalSubtraction:
         self.ArgsDict = default
 
 
+    def FindTransient(self, Threshold = 3.):
+        try:
+            self.Scorr_
+        except AttributeError:
+            self.Scorr()
+        maxima = (self.Scorr_ == scipy.ndimage.maximum_filter(self.Scorr_, 4))
+        PeaksIndex = np.where(maxima)
+        Peaks = self.Scorr_[PeaksIndex]
+        Transients = np.array([Peaks, PeaksIndex[0], PeaksIndex[1]]).transpose()
+        TransientsSortIndex = np.argsort(Transients[:,0])
+        Transients = Transients[TransientsSortIndex[::-1]]
+        Transients = Transients[np.where(Transients[:,0] >= Threshold)]
+        np.savetxt('transients.txt', Transients)
+
+
     def CheckAlign(self):
         '''Check if images need alignment'''
 
         if self.ArgsDict['Align']:
             self.RBackground = AlignImages(self.Nf, self.Rf)
             self.Rf = self.Nf.replace('.fits', '.ref.fits')
+
+
+    def CheckBackground(self):
+        try:
+            self.NBackground = fits.getdata(self.ArgsDict['NewBackground'])
+        except ValueError:
+            self.NBackground = self.N
+        try:
+            self.RBackground = fits.getdata(self.ArgsDict['RefBackground'])
+        except ValueError:
+            self.RBackground = self.R
 
 
     def CheckFlatten(self):
@@ -104,7 +130,6 @@ class OptimalSubtraction:
         else:
             self.beta = beta
             self.gamma = gamma
-            #PlotSolution(self.N, self.R, self.Pn, self.Pr, self.sn, self.sr, beta = self.beta, gamma = self.gamma, NSaturation = GetSaturationCount(self.Nf), RSaturation = GetSaturationCount(self.Rf))
 
 
     def CheckPSFsExist(self):
@@ -112,7 +137,7 @@ class OptimalSubtraction:
 
         Prf = self.ArgsDict['RefPSF']
         Pnf = self.ArgsDict['NewPSF']
-        if Prf != '':
+        if Pnf != '':
             self.Pnf = Pnf
         else:
             FWHM = self.ArgsDict['NewFWHM']
@@ -120,7 +145,7 @@ class OptimalSubtraction:
             self.Pnf = FitPSF(self.Nf, FWHM, Noise, Verbose = self.ArgsDict['Verbose'], Show = self.ArgsDict['Show'])
             self.ArgsDict.update({'PSFfromIRAF': True})
 
-        if Pnf != '':
+        if Prf != '':
             self.Prf = Prf
         else:
             FWHM = self.ArgsDict['RefFWHM']
@@ -204,9 +229,6 @@ class OptimalSubtraction:
         Fd = self.beta / np.sqrt(self.sn**2 + self.sr**2*self.beta**2)
         self.Fd_ = np.real(Fd)
         return np.real(Fd)
-
-
-#    def FindTransients(self):
 
 
     def Flux(self, normalize = ''):
@@ -639,6 +661,8 @@ def SubtractBackground(data, NumStamps = 30, Border = 200):
     return dataCorr
 
 def Gauss(x, a, b, c):
+    '''Return a gaussian function'''
+
     return a * np.exp(-(x-b)**2/(2*c**2))
 
 
@@ -726,7 +750,6 @@ def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCo
 
     return PSFFile
 
-        
 
 def gamma(beta, gammaPrime, sn, sr):
     '''Convert params in fourier space to image space'''
@@ -833,39 +856,10 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None,
 
     plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, RobustFit.fittedvalues, 'r-')
     plt.show()
-    #PlotSolution(N, R, Pn, Pr, sn, sr, beta = beta, gamma = gamma, NSaturation = NSaturation, RSaturation = RSaturation)
 
     print 'Beta = ' + str(beta)
     print 'Gamma = ' + str(gamma(beta, gammaPrime, sn, sr))
     return beta, gamma(beta, gammaPrime, sn, sr), betaError, gammaPrimeError
-
-
-def PlotSolution(N, R, Pn, Pr, sn, sr, beta = 1., gamma = 0., NSaturation = None, RSaturation = None):
-    '''Plot the data and the fit for visual comparison'''
-
-    N_hat = np.fft.fft2(N)    
-    R_hat = np.fft.fft2(R)
-    Pr_hat = np.fft.fft2(Pr)
-    Pn_hat = np.fft.fft2(Pn)
-
-    SqrtDen = np.sqrt(sn ** 2 * abs(Pr_hat) ** 2 + beta ** 2 * sr ** 2 * abs(Pn_hat) ** 2)
-    Dn_hat = Pr_hat * N_hat / SqrtDen
-    Dr_hat = Pn_hat * R_hat / SqrtDen
-    s, d = N.shape[0], N.shape[0] / 8
-    Dn = np.real(np.fft.ifft2(Dn_hat))[s-d: s+d, s-d: s+d]
-    Dr = np.real(np.fft.ifft2(Dr_hat))[s-d: s+d, s-d: s+d]
-    DnFlatten = Dn.flatten()
-    DrFlatten = Dr.flatten()
-
-    DnGoodPix = CleanDataIndex(DnFlatten, SatCount = NSaturation, Significance = 1.)
-    DrGoodPix = CleanDataIndex(DrFlatten, SatCount = RSaturation, Significance = 1.)
-    GoodPixInCommon = np.intersect1d(DnGoodPix, DrGoodPix)
-    DnFlatten = DnFlatten[GoodPixInCommon]
-    DrFlatten = DrFlatten[GoodPixInCommon]
-    print len(DnFlatten), len(DrFlatten)
-
-    plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, np.polyval([beta, gamma], DrFlatten), 'r-')
-    plt.show()
 
 
 def Normalize(Image):
@@ -893,8 +887,6 @@ def RemoveSaturatedFromCatalog(catalog):
     SafeIndex = np.where(catalog[:7].flatten() == 0)
     SafeSource = catalog[SafeIndex]
     return SafeSource
-
-
 
 
 if __name__ == '__main__':
@@ -941,6 +933,8 @@ if __name__ == '__main__':
         OptimalSubtraction(args.input, args.template, d).SaveS(args.output, args.normalize)
     elif args.type == 'Thresh':
         OptimalSubtraction(args.input, args.template, d).SaveScorrThreshold(args.output, normalize = args.normalize, Thresh = args.threshold)
+    elif args.type == 'Find':
+        OptimalSubtraction(args.input, args.template, d).FindTransient()
     else:
         pass
 
