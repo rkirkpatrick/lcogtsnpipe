@@ -218,7 +218,7 @@ class OptimalSubtraction:
         return np.real(Fd)
 
 
-    def FindTransient(self, Threshold = 3.):
+    def FindTransient(self, Threshold = 3., filename = 'transients.txt'):
         try:
             self.Scorr_
         except AttributeError:
@@ -230,7 +230,7 @@ class OptimalSubtraction:
         TransientsSortIndex = np.argsort(Transients[:,0])
         Transients = Transients[TransientsSortIndex[::-1]]
         Transients = Transients[np.where(Transients[:,0] >= Threshold)]
-        np.savetxt('transients.txt', Transients)
+        np.savetxt(filename , Transients)
 
 
     def Flux(self, normalize = ''):
@@ -344,10 +344,10 @@ class OptimalSubtraction:
         self.S_ = np.real(S)
         return np.real(S)
 
-    def SaveD(self, Df, normalize = ''):
+    def SaveD(self, filename, normalize = ''):
         '''Calculate and save proper subtraction image to database'''
 
-        self.Df = Df
+        self.Df = filename
         self.D(normalize)
         hdu = fits.PrimaryHDU(np.real(self.D_))
         hdu.header = fits.getheader(self.Nf)
@@ -493,24 +493,24 @@ class OptimalSubtraction:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Perform optimal image subtraction')
-    parser.add_argument('-N', dest = 'input', help = 'New background subtracted image')
-    parser.add_argument('-R', dest = 'template', help = 'Reference background subtracted image')
-    parser.add_argument('-n', dest = 'input_PSF', default = '', help = 'New PSF')
-    parser.add_argument('-r', dest = 'template_PSF', default = '', help = 'Reference PSF')
+    parser.add_argument('-N', dest = 'input', help = 'New background subtracted image', required = True)
+    parser.add_argument('-R', dest = 'template', help = 'Reference background subtracted image', required = True)
+    parser.add_argument('--NewPSF', dest = 'input_PSF', default = '', help = 'New PSF')
+    parser.add_argument('--RefPSF', dest = 'template_PSF', default = '', help = 'Reference PSF')
     parser.add_argument('-o', dest = 'output', help = 'Output image')
     parser.add_argument('--NewBackground', dest = 'NewBackground', help = 'New image with background')
     parser.add_argument('--RefBackground', dest = 'RefBackground', help = 'Reference image with background')
-    parser.add_argument('--type', dest = 'type', default = 'D', help = 'Subtraction type')
-    parser.add_argument('--threshold', dest = 'threshold', help = 'Sigma threshold for detection')
+    parser.add_argument('--Mode', dest = 'mode', default = 'D', help = 'Subtraction mode')
+    #parser.add_argument('--threshold', dest = 'threshold', help = 'Sigma threshold for detection')
     
-    parser.add_argument('--interactive', dest = 'interactive', action = 'store_true', default = False, help = 'Fit beta and gamma interactively')
-    parser.add_argument('--verbose', dest = 'verbose', action = 'store_true', default = False, help = 'Show IRAF output in PSF fitting')
-    parser.add_argument('-b', dest = 'beta', default = 99999, help = 'Gain matching parameter beta')
-    parser.add_argument('-g', dest = 'gamma', default = 99999, help = 'Gain matching parameter gamma')
+    parser.add_argument('--Interactive', dest = 'interactive', action = 'store_true', default = False, help = 'Fit beta and gamma interactively')
+    parser.add_argument('--Verbose', dest = 'verbose', action = 'store_true', default = False, help = 'Show IRAF output in PSF fitting')
+    parser.add_argument('--Beta', dest = 'beta', default = 99999, help = 'Gain matching parameter beta')
+    parser.add_argument('-Gamma', dest = 'gamma', default = 99999, help = 'Gain matching parameter gamma')
     parser.add_argument('--NewNoise', dest = 'NewNoise', default = 5, help = 'Standard deviation of new image background')
     parser.add_argument('--RefNoise', dest = 'RefNoise', default = 5, help = 'Standard deviation of ref image background')
-    parser.add_argument('--flatten', dest = 'flatten', action = 'store_true', default = False, help = 'Fix Background locally')
-    parser.add_argument('--normalize', default = '', dest = 'normalize', help = 'Normalize to which image')
+    parser.add_argument('--Flatten', dest = 'flatten', action = 'store_true', default = False, help = 'Fix Background locally')
+    parser.add_argument('--Normalize', default = '', dest = 'normalize', help = 'Normalize to which image')
     args = parser.parse_args()
 
     d = {
@@ -527,15 +527,15 @@ if __name__ == '__main__':
         'RefNoise': float(args.RefNoise)
         }
 
-    if args.type == 'D':
+    if args.mode == 'D':
         OptimalSubtraction(args.input, args.template, d).SaveD(args.output, args.normalize)
-    elif args.type == 'Scorr':
+    elif args.mode == 'Scorr':
         OptimalSubtraction(args.input, args.template, d).SaveScorr(args.output, args.normalize)
-    elif args.type == 'S':
+    elif args.mode == 'S':
         OptimalSubtraction(args.input, args.template, d).SaveS(args.output, args.normalize)
-    elif args.type == 'Thresh':
+    elif args.mode == 'Thresh':
         OptimalSubtraction(args.input, args.template, d).SaveScorrThreshold(args.output, normalize = args.normalize, Thresh = args.threshold)
-    elif args.type == 'Find':
+    elif args.mode == 'Find':
         OptimalSubtraction(args.input, args.template, d).FindTransient()
     else:
         pass
