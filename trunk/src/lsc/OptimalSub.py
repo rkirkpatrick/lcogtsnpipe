@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+
 import numpy as np
 import scipy
 from astropy.io import fits
@@ -8,6 +9,7 @@ from os import system
 import argparse
 from lsc.lscastrodef import sextractor
 import statsmodels.api as sm
+import logging
 
 from SubtractionUtil import *
 
@@ -22,10 +24,11 @@ class OptimalSubtraction:
     def __init__(self, Nf, Rf, ArgsDict = {}):
         '''Take filenames and turn them into arrays and unpack arguments in ArgsDict'''
 
+        logging.basicConfig(filename = Nf.replace('.fits', '.log'))
+
         self.ArgsDict = ArgsDict
         self.Nf, self.Rf = Nf, Rf
         self.MakeDefaults()
-
         
 
         #self.Nf, self.Rf = Nf, Rf
@@ -37,7 +40,9 @@ class OptimalSubtraction:
 
         self.N, self.R, self.Pn, self.Pr = CropImages(fits.getdata(self.Nf), fits.getdata(self.Rf), self.Pn, self.Pr)
         self.CheckBackground()
-        self.CheckFlatten()
+
+        # work in progress
+        #self.CheckFlatten()
 
         self.sn = self.ArgsDict['NewNoise']
         self.sr = self.ArgsDict['RefNoise']
@@ -48,7 +53,7 @@ class OptimalSubtraction:
         '''Set up default optional arguments'''
 
         default = {
-            'Align': False, 
+            'Align': True, 
             'Beta': 99999., 
             'Interactive': False, 
             'Flatten': False, 
@@ -56,21 +61,20 @@ class OptimalSubtraction:
             'RefPSF': '', 
             'NewPSF': '', 
             'RefBackground': self.Rf, 
-            'RefFWHM': 1.5, 
-            'RefNoise': 5., 
+            'RefFWHM': 5., 
+            'RefNoise': FitNoise(fits.getdata(self.Rf))[2], 
             'RefReadNoise': 0., 
             'RefSaturation': 10e6, #GetSaturationCount(self.Rf), 
             'RefVariance': '', 
             'NewBackground': self.Nf, 
-            'NewFWHM': 1.5, 
-            'NewNoise': 5.,
+            'NewFWHM': 5., 
+            'NewNoise': FitNoise(fits.getdata(self.Nf))[2],
             'NewReadNoise': 0., 
             'NewSaturation': 10e6, #GetSaturationCount(self.Nf), 
             'NewVariance': '', 
             'PSFfromIRAF': True, 
-            'Show': True, 
-            'SigmaX': 0.1, 
-            'SigmaY': 0.1, 
+            'SigmaX': 0.5, 
+            'SigmaY': 0.5, 
             'Verbose': False
         }
 
@@ -82,7 +86,7 @@ class OptimalSubtraction:
         '''Check if images need alignment'''
 
         if self.ArgsDict['Align']:
-            self.RBackground = AlignImages(self.Nf, self.Rf)
+            self.R = AlignImages(self.Nf, self.Rf)
             self.Rf = self.Nf.replace('.fits', '.ref.fits')
 
 
@@ -129,7 +133,7 @@ class OptimalSubtraction:
         else:
             FWHM = self.ArgsDict['NewFWHM']
             Noise = self.ArgsDict['NewNoise']
-            self.Pnf = FitPSF(self.Nf, FWHM, Noise, Verbose = self.ArgsDict['Verbose'], Show = self.ArgsDict['Show'])
+            self.Pnf = FitPSF(self.Nf, FWHM, Noise, Verbose = self.ArgsDict['Verbose'], Show = self.ArgsDict['Interactive'])
             self.ArgsDict.update({'PSFfromIRAF': True})
 
         if Prf != '':
@@ -137,7 +141,7 @@ class OptimalSubtraction:
         else:
             FWHM = self.ArgsDict['RefFWHM']
             Noise = self.ArgsDict['RefNoise']
-            self.Prf = FitPSF(self.Rf, FWHM, Noise, Verbose = self.ArgsDict['Verbose'], Show = self.ArgsDict['Show'])
+            self.Prf = FitPSF(self.Rf, FWHM, Noise, Verbose = self.ArgsDict['Verbose'], Show = self.ArgsDict['Interactive'])
             self.ArgsDict.update({'PSFfromIRAF': True})
             
 
@@ -223,9 +227,11 @@ class OptimalSubtraction:
             self.Scorr_
         except AttributeError:
             self.Scorr()
-        maxima = (self.Scorr_ == scipy.ndimage.maximum_filter(self.Scorr_, 4))
+        edge = 100
+        Scorr_ = self.Scorr_[edge: self.Scorr_.shape[0] - edge, edge: self.Scorr_.shape[1] - 100]
+        maxima = (Scorr_ == scipy.ndimage.maximum_filter(Scorr_, 4))
         PeaksIndex = np.where(maxima)
-        Peaks = self.Scorr_[PeaksIndex]
+        Peaks = Scorr_[PeaksIndex]
         Transients = np.array([Peaks, PeaksIndex[0], PeaksIndex[1]]).transpose()
         TransientsSortIndex = np.argsort(Transients[:,0])
         Transients = Transients[TransientsSortIndex[::-1]]
@@ -350,7 +356,8 @@ class OptimalSubtraction:
         self.Df = filename
         self.D(normalize)
         hdu = fits.PrimaryHDU(np.real(self.D_))
-        hdu.header = fits.getheader(self.Nf)
+        #hdu.header = fits.getheader(self.Nf)
+        #print normalize, self.beta, self.gamma
         hdu.header['PHOTNORM'] = normalize
         hdu.header['BETA'] = self.beta
         hdu.header['GAMMA'] = self.gamma
@@ -496,17 +503,20 @@ if __name__ == '__main__':
     parser.add_argument('-N', dest = 'input', help = 'New background subtracted image', required = True)
     parser.add_argument('-R', dest = 'template', help = 'Reference background subtracted image', required = True)
     parser.add_argument('--NewPSF', dest = 'input_PSF', default = '', help = 'New PSF')
-    parser.add_argument('--RefPSF', dest = 'template_PSF', default = '', help = 'Reference PSF')
+    parser.add_argument('--RefPSF', dest = 'template_PSF', default = '', help = 'Reference FWHM')
+    parser.add_argument('--NewFWHM', dest = 'input_FWHM', default = '', help = 'New FWHM')
+    parser.add_argument('--RefFWHM', dest = 'template_FWHM', default = '', help = 'Reference PSF')
     parser.add_argument('-o', dest = 'output', help = 'Output image')
     parser.add_argument('--NewBackground', dest = 'NewBackground', help = 'New image with background')
     parser.add_argument('--RefBackground', dest = 'RefBackground', help = 'Reference image with background')
     parser.add_argument('--Mode', dest = 'mode', default = 'D', help = 'Subtraction mode')
     #parser.add_argument('--threshold', dest = 'threshold', help = 'Sigma threshold for detection')
     
-    parser.add_argument('--Interactive', dest = 'interactive', action = 'store_true', default = False, help = 'Fit beta and gamma interactively')
+    parser.add_argument('--Interactive', dest = 'interactive', action = 'store_true', default = False, help = 'Perform subtraction interactively')
+    parser.add_argument('--Align', dest = 'align', action = 'store_true', default = False, help = 'Align images before subtraction')
     parser.add_argument('--Verbose', dest = 'verbose', action = 'store_true', default = False, help = 'Show IRAF output in PSF fitting')
     parser.add_argument('--Beta', dest = 'beta', default = 99999, help = 'Gain matching parameter beta')
-    parser.add_argument('-Gamma', dest = 'gamma', default = 99999, help = 'Gain matching parameter gamma')
+    parser.add_argument('--Gamma', dest = 'gamma', default = 99999, help = 'Gain matching parameter gamma')
     parser.add_argument('--NewNoise', dest = 'NewNoise', default = 5, help = 'Standard deviation of new image background')
     parser.add_argument('--RefNoise', dest = 'RefNoise', default = 5, help = 'Standard deviation of ref image background')
     parser.add_argument('--Flatten', dest = 'flatten', action = 'store_true', default = False, help = 'Fix Background locally')
@@ -514,9 +524,12 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     d = {
+        'Align': args.align, 
         'Flatten': args.flatten, 
         'NewPSF': args.input_PSF, 
         'RefPSF': args.input_PSF, 
+        'NewFWHM': args.input_FWHM, 
+        'RefFWHM': args.template_FWHM, 
         'Interactive': args.interactive, 
         'Beta': float(args.beta), 
         'Gamma': float(args.gamma), 

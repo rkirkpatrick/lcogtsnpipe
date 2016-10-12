@@ -4,10 +4,13 @@ from astropy.io import fits
 from pyraf import iraf
 import time
 from os import system
+import os
 import argparse
 from lsc.lscastrodef import sextractor
 import statsmodels.api as sm
 import matplotlib.pyplot as plt
+import logging
+
 
 def AlignImages(NewFile, RefFile):
     '''Align reference image to new image when both images have WCS'''
@@ -112,12 +115,24 @@ def FitB(NBackground, RBackground, Pn, Pr, sn, sr, NSaturation = None, RSaturati
 
         print 'x: {0}, y: {1}'.format(star[0] + d, star[2] + d)
         # iteratively solve for linear fit of beta and gamma
-        if Interactive:
-            beta, gamma, betaError, gammaError = InteractiveFit(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
-        else:
-            beta, gamma, betaError, gammaError = IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
+        #if Interactive:
+        #    beta, gamma, betaError, gammaError = InteractiveFit(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation)
+        #else:
+        beta, gamma, betaError, gammaError = IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = NSaturation, RSaturation = RSaturation, Interactive = Interactive)
 
     return beta, gamma, betaError, gammaError
+
+
+def FitNoise(Data):
+    Edge = 50
+    xMid, yMid = Data.shape[0] / 2, Data.shape[1] / 2
+    TrimmedData = Data[xMid-Edge: xMid+Edge, yMid-Edge: yMid+Edge]
+    TrimmedData = TrimmedData[np.where(TrimmedData < np.percentile(TrimmedData, 90))]
+    Hist = np.histogram(TrimmedData, bins = 100)
+    x = Hist[1][:-1]
+    y = Hist[0]
+    Popt, Cov = scipy.optimize.curve_fit(Gauss, x, y, p0 = [1., np.median(Data), 1.], maxfev = 1600)
+    return Popt
 
 
 def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCount = 15000.):
@@ -127,6 +142,7 @@ def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCo
         verb = 'yes'
     else:
         verb = 'no'
+
     PSFisGood = False
 
     CoordsFile = ImageFile + '.coo'
@@ -139,7 +155,13 @@ def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCo
 
 
     while not PSFisGood:
-        system('rm {} {} {} {} {} {} {}'.format(PSFFile + '.fits', CoordsFile, MagFile, PSTFile, OpstFile, GroupFile, SeeFile))
+        DeleteList = [PSFFile + '.fits', CoordsFile, MagFile, PSTFile, OpstFile, GroupFile, SeeFile]
+        for item in DeleteList:
+            try:
+                os.remove(item)
+            except:
+                pass
+        #system('rm {} {} {} {} {} {} {}'.format(PSFFile + '.fits', CoordsFile, MagFile, PSTFile, OpstFile, GroupFile, SeeFile))
 
         try:
             # generate star catalog using daofind
@@ -147,17 +169,17 @@ def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCo
             iraf.digiphot()
             iraf.daophot(_doprint = 0)
             iraf.datapars.datamax = MaxCount
-            iraf.datapars.fwhmpsf = FWHM
             iraf.datapars.sigma = Noise
             iraf.findpars.threshold = 5.
             iraf.datapars.datamin = 0
             iraf.datapars.datamax = MaxCount
+            iraf.datapars.fwhm = FWHM
             iraf.daofind(ImageFile, output = CoordsFile, verify = 'no', display = 'no', verbose = verb)
 
             # uncomment the raw_input line if daofind adds stars that do not exist in catalog
             # this gives you time to manually remove nonexistent stars that cause a bad psf fit
             # this is temporary until daofind works better with images coadded with swarp
-            raw_input('Manually edit .coo file now if necessary; Press enter to continue ')
+            #raw_input('Manually edit .coo file now if necessary; Press enter to continue ')
 
             # do aperture photometry
             a1, a2, a3, a4, = int(FWHM + 0.5), int(FWHM * 2 + 0.5), int(FWHM * 3 + 0.5), int(FWHM * 4 + 0.5)
@@ -198,14 +220,21 @@ def FitPSF(ImageFile, FWHM = 5., Noise = 30., Verbose = True, Show = True, MaxCo
                 break
 
         except:
-            print 'PSF fitting failed; try again with different parameters'
-            FWHM = float(raw_input('New FWHM: '))
-            Noise = float(raw_input('New Noise: '))
+            if Show:
+                print 'PSF fitting failed; try again with different parameters'
+                FWHM = float(raw_input('New FWHM: '))
+                Noise = float(raw_input('New Noise: '))
+            else:
+                print 'Unable to fit with given parameters'
+                logging.info('PSF fitting failed for {}'.format(ImageFile))
+                break
+
+    #system('rm {} {} {} {} {} {} {}'.format(CoordsFile, MagFile, PSTFile, OpstFile, GroupFile, SeeFile))
 
     return PSFFile
 
 
-def gamma(beta, gammaPrime, sn, sr):
+def Gamma(beta, gammaPrime, sn, sr):
     '''Convert params in fourier space to image space'''
 
     return gammaPrime * np.sqrt(sn ** 2 + beta ** 2 * sr ** 2)
@@ -252,20 +281,12 @@ def InteractiveFit(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None)
 
     while not GoodFit:
 
-        SqrtDen = np.sqrt(sn ** 2 * abs(Pr_hat) ** 2 + beta ** 2 * sr ** 2 * abs(Pn_hat) ** 2)
-        Dn_hat = Pr_hat * N_hat / SqrtDen
-        Dr_hat = Pn_hat * R_hat / SqrtDen
-        Dn = np.real(np.fft.ifft2(Dn_hat))
-        Dr = np.real(np.fft.ifft2(Dr_hat))
-        DnFlatten = Dn.flatten()
-        DrFlatten = Dr.flatten()
-
         # remove saturated pixels
-        DnGoodPix = CleanDataIndex(DnFlatten, SatCount = NSaturation)
-        DrGoodPix = CleanDataIndex(DrFlatten, SatCount = RSaturation)
+        DnGoodPix = CleanDataIndex(N.flatten(), SatCount = NSaturation)
+        DrGoodPix = CleanDataIndex(R.flatten(), SatCount = RSaturation)
         GoodPixInCommon = np.intersect1d(DnGoodPix, DrGoodPix)
-        DnFlatten = DnFlatten[GoodPixInCommon]
-        DrFlatten = DrFlatten[GoodPixInCommon]
+        DnFlatten = N.flatten()[GoodPixInCommon]
+        DrFlatten = R.flatten()[GoodPixInCommon]
 
         plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, np.polyval([beta, gamma], DrFlatten), 'r-')
         plt.show(block = False)
@@ -283,7 +304,7 @@ def InteractiveFit(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None)
     return beta, gamma, 0, 0 # functions expect error output
 
 
-def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None, interactive = False):
+def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None, Interactive = False):
     '''Solve for linear fit iteratively'''
 
     BetaTolerance = 1e-8
@@ -334,16 +355,32 @@ def IterativeSolve(N, R, Pn, Pr, sn, sr, NSaturation = None, RSaturation = None,
         if i == MaxIteration: break
         i += 1
         print 'Iteration {}:'.format(i)
-        print 'Beta = {0}, gamma = {1}'.format(beta, gamma(beta, gammaPrime, sn, sr))
+        print 'Beta = {0}, gamma = {1}'.format(beta, Gamma(beta, gammaPrime, sn, sr))
 
     print 'Fit done in {} iterations'.format(i)
 
-    plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, RobustFit.fittedvalues, 'r-')
-    plt.show()
+    Cov = RobustFit.bcov_scaled[0,0]
+
+    if Interactive:
+        plt.plot(DrFlatten, DnFlatten, 'bo', DrFlatten, RobustFit.fittedvalues, 'r-')
+        plt.show()
+
+    gamma = Gamma(beta, gammaPrime, sn, sr)
+
+
+    if Cov > 1000.:
+        print 'The is a poor fit. Try fitting the PSFs manually. For now, Beta = 1'
+        beta = 1.
+        gamma = FitNoise(N)[1] - FitNoise(R)[1]
+        betaError = 1.
+        gammaError = 1.
+        logging.info('Parameter fitting for images failed')
+        raise ValueError
 
     print 'Beta = ' + str(beta)
-    print 'Gamma = ' + str(gamma(beta, gammaPrime, sn, sr))
-    return beta, gamma(beta, gammaPrime, sn, sr), betaError, gammaPrimeError
+    print 'Gamma = ' + str(gamma)
+    print 'Beta Variance = ' +str(Cov)
+    return beta, gamma, betaError, gammaPrimeError
 
 
 def Normalize(Image):
